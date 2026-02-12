@@ -1,0 +1,59 @@
+!!python/object/new:pytorch_lightning.utilities.parsing.AttributeDict
+dictitems:
+  data:
+    data_dir: /export/data/lucas/SemanticKITTI
+    dataloader: KITTI
+    dataset_norm: false
+    max_range: 50.0
+    num_points: 180000
+    resolution: 0.05
+    split: train
+    std_axis_norm: false
+    test:
+    - '11'
+    - '12'
+    - '13'
+    - '14'
+    - '15'
+    - '16'
+    - '17'
+    - '18'
+    - '19'
+    - '20'
+    - '21'
+    train:
+    - '00'
+    - '01'
+    - '02'
+    - '03'
+    - '04'
+    - '05'
+    - '06'
+    - '07'
+    - 09
+    - '10'
+    validation:
+    - 08
+  diff:
+    beta_end: 0.007
+    beta_func: linear
+    beta_start: 3.5e-05
+    reg_weight: 5.0
+    s_steps: 30
+    t_steps: 1000
+  experiment:
+    id: prob10_5p0Reg_50m_FilterVP_earlier_scheduler
+  git_commit_version: b'57cd8ad'
+  model:
+    out_dim: 96
+  train:
+    batch_size: 2
+    decay_lr: 0.0001
+    lr: 0.0001
+    max_epoch: 100
+    n_gpus: 2
+    num_workers: 4
+    uncond_max_w: 6.0
+    uncond_min_w: 6.0
+    uncond_prob: 0.1
+    uncond_w: 6.0
