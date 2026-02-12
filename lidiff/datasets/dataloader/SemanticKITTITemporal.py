@@ -59,7 +59,7 @@ class TemporalKITTISet(Dataset):
             point_seq_path = os.path.join(self.data_dir, 'dataset', 'sequences', seq)
             point_seq_bin = natsorted(os.listdir(os.path.join(point_seq_path, 'velodyne')))
             poses = load_poses(os.path.join(point_seq_path, 'calib.txt'), os.path.join(point_seq_path, 'poses.txt'))
-            p_full = np.load(f'{point_seq_path}/map_clean.npy') if self.split != 'test' else np.array([[1,0,0],[0,1,0],[0,0,1]])
+            p_full = np.load(f'{point_seq_path}/map_clean.npy', mmap_mode='r') if self.split != 'test' else np.array([[1,0,0],[0,1,0],[0,0,1]])
             self.cache_maps[seq] = p_full
  
             for file_num in range(0, len(point_seq_bin)):

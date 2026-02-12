@@ -41,6 +41,10 @@ def main(config, weights, checkpoint, test):
     set_deterministic()
 
     cfg = yaml.safe_load(open(config))
+
+     # Create experiment directories
+    makedirs(f'experiments/{cfg["experiment"]["id"]}/checkpoints', exist_ok=True)
+    
     # overwrite the data path in case we have defined in the env variables
     if environ.get('TRAIN_DATABASE'):
         cfg['data']['data_dir'] = environ.get('TRAIN_DATABASE')
