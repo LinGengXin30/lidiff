@@ -19,6 +19,10 @@ def set_deterministic():
     torch.cuda.manual_seed(42)
     torch.backends.cudnn.deterministic = True
 
+class CheckpointDebugCallback(Callback):
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint):
+        print(f"\n[DEBUG] Triggering checkpoint save at epoch {trainer.current_epoch}")
+
 @click.command()
 ### Add your options here
 @click.option('--config',
@@ -42,9 +46,12 @@ def main(config, weights, checkpoint, test):
 
     cfg = yaml.safe_load(open(config))
 
-     # Create experiment directories
-    makedirs(f'experiments/{cfg["experiment"]["id"]}/checkpoints', exist_ok=True)
-    
+     # Create experiment directories using absolute path
+    root_dir = dirname(dirname(abspath(__file__))) # lidiff/
+    exp_dir = join(root_dir, 'experiments', cfg['experiment']['id'])
+    ckpt_dir = join(exp_dir, 'checkpoints')
+    makedirs(ckpt_dir, exist_ok=True)
+
     # overwrite the data path in case we have defined in the env variables
     if environ.get('TRAIN_DATABASE'):
         cfg['data']['data_dir'] = environ.get('TRAIN_DATABASE')
@@ -82,17 +89,18 @@ def main(config, weights, checkpoint, test):
     #Add callbacks
     lr_monitor = LearningRateMonitor(logging_interval='step')
     checkpoint_saver = ModelCheckpoint(
-                                 dirpath=f'experiments/{cfg["experiment"]["id"]}/checkpoints',
+                                 dirpath=ckpt_dir,
                                  filename=cfg['experiment']['id']+'_epoch_{epoch:02d}',
                                  save_top_k=-1,
                                  save_last=True,
                                  every_n_epochs=1,
-                                 verbose=True
+                                 verbose=True,
+                                 save_on_train_epoch_end=True 
                                  )
     
-    print(f"Checkpoints will be saved to: {abspath(checkpoint_saver.dirpath)}")
+    print(f"Checkpoints will be saved to: {ckpt_dir}")
 
-    tb_logger = pl_loggers.TensorBoardLogger('experiments/'+cfg['experiment']['id'],
+    tb_logger = pl_loggers.TensorBoardLogger(exp_dir,
                                              default_hp_metric=False)
     #Setup trainer
     if torch.cuda.device_count() > 1:
@@ -103,10 +111,10 @@ def main(config, weights, checkpoint, test):
                           log_every_n_steps=100,
                           resume_from_checkpoint=checkpoint,
                           max_epochs= cfg['train']['max_epoch'],
-                          callbacks=[lr_monitor, checkpoint_saver],
+                          callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
                           check_val_every_n_epoch=1,
                           num_sanity_val_steps=0,
-                          limit_val_batches=0.001,
+                          # limit_val_batches=0.001, # Removed to ensure validation runs and checkpoints are saved
                           accelerator='ddp',
                           )
     else:
@@ -115,10 +123,10 @@ def main(config, weights, checkpoint, test):
                           log_every_n_steps=100,
                           resume_from_checkpoint=checkpoint,
                           max_epochs= cfg['train']['max_epoch'],
-                          callbacks=[lr_monitor, checkpoint_saver],
-                          check_val_every_n_epoch=5,
+                          callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
+                          check_val_every_n_epoch=1,
                           num_sanity_val_steps=0,
-                          limit_val_batches=0.001,
+                          # limit_val_batches=0.001, # Removed to ensure validation runs and checkpoints are saved
                           )
 
 
