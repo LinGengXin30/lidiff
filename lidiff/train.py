@@ -2,7 +2,7 @@ import click
 from os.path import join, dirname, abspath
 from os import environ, makedirs
 import subprocess
-from pytorch_lightning import Trainer
+from pytorch_lightning import Trainer, Callback
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import numpy as np
