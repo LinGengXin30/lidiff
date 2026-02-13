@@ -88,6 +88,7 @@ def main(config, weights, checkpoint, test):
 
     #Add callbacks
     lr_monitor = LearningRateMonitor(logging_interval='step')
+    debug_ckpt = CheckpointDebugCallback()
     checkpoint_saver = ModelCheckpoint(
                                  dirpath=ckpt_dir,
                                  filename=cfg['experiment']['id']+'_epoch_{epoch:02d}',
@@ -114,7 +115,8 @@ def main(config, weights, checkpoint, test):
                           callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
                           check_val_every_n_epoch=1,
                           num_sanity_val_steps=0,
-                          # limit_val_batches=0.001, # Removed to ensure validation runs and checkpoints are saved
+                          limit_train_batches=10, # DEBUG: Run only 10 batches per epoch for fast testing
+                          limit_val_batches=5,    # DEBUG: Run only 5 batches for validation
                           accelerator='ddp',
                           )
     else:
@@ -126,7 +128,8 @@ def main(config, weights, checkpoint, test):
                           callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
                           check_val_every_n_epoch=1,
                           num_sanity_val_steps=0,
-                          # limit_val_batches=0.001, # Removed to ensure validation runs and checkpoints are saved
+                          limit_train_batches=10, # DEBUG: Run only 10 batches per epoch for fast testing
+                          limit_val_batches=5,    # DEBUG: Run only 5 batches for validation
                           )
 
 
