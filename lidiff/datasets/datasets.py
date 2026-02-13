@@ -35,7 +35,7 @@ class TemporalKittiDataModule(LightningDataModule):
             dataset_norm=self.cfg['data']['dataset_norm'],
             std_axis_norm=self.cfg['data']['std_axis_norm'])
         loader = DataLoader(data_set, batch_size=self.cfg['train']['batch_size'], shuffle=True,
-                            num_workers=self.cfg['train']['num_workers'], collate_fn=collate)
+                            num_workers=self.cfg['train']['num_workers'], collate_fn=collate, persistent_workers=True)
         return loader
 
     def val_dataloader(self, pre_training=True):
