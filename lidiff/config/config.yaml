@@ -20,7 +20,7 @@ train:
     uncond_prob: 0.1
     uncond_w: 6.
     n_gpus: 1
-    num_workers: 4
+    num_workers: 0
     max_epoch: 20
     lr: 0.0001
     batch_size: 1

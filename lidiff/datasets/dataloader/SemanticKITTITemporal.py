@@ -59,8 +59,8 @@ class TemporalKITTISet(Dataset):
             point_seq_path = os.path.join(self.data_dir, 'dataset', 'sequences', seq)
             point_seq_bin = natsorted(os.listdir(os.path.join(point_seq_path, 'velodyne')))
             poses = load_poses(os.path.join(point_seq_path, 'calib.txt'), os.path.join(point_seq_path, 'poses.txt'))
-            p_full = np.load(f'{point_seq_path}/map_clean.npy', mmap_mode='r') if self.split != 'test' else np.array([[1,0,0],[0,1,0],[0,0,1]])
-            self.cache_maps[seq] = p_full
+            # p_full = np.load(f'{point_seq_path}/map_clean.npy') if self.split != 'test' else np.array([[1,0,0],[0,1,0],[0,0,1]])
+            # self.cache_maps[seq] = p_full
  
             for file_num in range(0, len(point_seq_bin)):
                 self.points_datapath.append(os.path.join(point_seq_path, 'velodyne', point_seq_bin[file_num]))
@@ -94,12 +94,36 @@ class TemporalKITTISet(Dataset):
         p_part = p_part[p_part[:,2] > -4.]
         pose = self.seq_poses[index]
 
-        p_map = self.cache_maps[seq_num]
+        # Load map on the fly to avoid memory issues and pickling overhead
+        if self.split != 'test':
+            point_seq_path = os.path.join(self.data_dir, 'dataset', 'sequences', seq_num)
+            p_map = np.load(f'{point_seq_path}/map_clean.npy', mmap_mode='r')
+        else:
+            p_map = np.array([[1,0,0],[0,1,0],[0,0,1]])
 
         if self.split != 'test':
             trans = pose[:-1,-1]
-            dist_full = np.sum((p_map - trans)**2, -1)**.5
-            p_full = p_map[dist_full < self.max_range]
+            
+            # Optimization: Compute distance in chunks to avoid Memory Error/Swapping
+            # dist_full = np.sum((p_map - trans)**2, -1)**.5
+            # p_full = p_map[dist_full < self.max_range]
+            
+            p_full_list = []
+            chunk_size = 500000 # 500k points per chunk
+            for i in range(0, p_map.shape[0], chunk_size):
+                chunk = p_map[i:i+chunk_size]
+                # Calculate squared distance directly to avoid sqrt unless necessary, but here we need threshold
+                # Using simple broadcasting. chunk is (M, 3), trans is (3,)
+                dist_sq = np.sum((chunk - trans)**2, axis=-1)
+                mask = dist_sq < self.max_range**2
+                if np.any(mask):
+                    p_full_list.append(chunk[mask])
+            
+            if len(p_full_list) > 0:
+                p_full = np.concatenate(p_full_list, axis=0)
+            else:
+                p_full = np.zeros((0, 3), dtype=np.float32)
+
             p_full = np.concatenate((p_full, np.ones((len(p_full),1))), axis=-1)
             p_full = (p_full @ np.linalg.inv(pose).T)[:,:3]
             p_full = p_full[p_full[:,2] > -4.]
