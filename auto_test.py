@@ -87,8 +87,13 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 metrics = trainer.test(model, dataloaders=data_module, verbose=False)[0]
                 
                 # Print Result
+                # Metrics from PL might be tensors on GPU
                 cd = metrics.get('test/cd_mean', -1)
                 f1 = metrics.get('test/fscore', -1)
+                
+                if hasattr(cd, 'item'): cd = cd.item()
+                if hasattr(f1, 'item'): f1 = f1.item()
+                
                 print(f"  -> Result [w={w}]: CD={cd:.4f}, F1={f1:.4f}")
 
         except Exception as e:
