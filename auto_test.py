@@ -84,14 +84,24 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 )
                 
                 # Run Test
-                metrics = trainer.test(model, dataloaders=data_module, verbose=False)[0]
+                # metrics is usually a list of dicts, but limit_test_batches returns accumulated results
+                # in a single dict if using a single dataloader.
+                # However, PL might return tensors still on GPU in that dict.
+                test_out = trainer.test(model, dataloaders=data_module, verbose=False)
                 
+                # Extract the dict from the list
+                metrics = test_out[0] if isinstance(test_out, list) and len(test_out) > 0 else {}
+
                 # Print Result
                 # Metrics from PL might be tensors on GPU
                 cd = metrics.get('test/cd_mean', -1)
                 f1 = metrics.get('test/fscore', -1)
                 
+                # Robustly handle tensor/gpu conversion
+                if hasattr(cd, 'cpu'): cd = cd.cpu()
                 if hasattr(cd, 'item'): cd = cd.item()
+                
+                if hasattr(f1, 'cpu'): f1 = f1.cpu()
                 if hasattr(f1, 'item'): f1 = f1.item()
                 
                 print(f"  -> Result [w={w}]: CD={cd:.4f}, F1={f1:.4f}")
