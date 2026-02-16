@@ -145,7 +145,12 @@ class DiffusionPoints(LightningModule):
             # i.e. memory leak
             x_cond, x_uncond = self.reset_partial_pcd(x_cond, x_uncond, x_mean, x_std)
 
-        makedirs(f'{self.logger.log_dir}/generated_pcd/', exist_ok=True)
+        # 检查logger是否存在
+        if hasattr(self, 'logger') and self.logger is not None:
+            makedirs(f'{self.logger.log_dir}/generated_pcd/', exist_ok=True)
+        else:
+            # 如果没有logger，创建一个临时目录
+            makedirs('tmp/generated_pcd/', exist_ok=True)
 
         return x_t
 

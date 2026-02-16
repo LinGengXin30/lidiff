@@ -1,3 +1,5 @@
+import os
+
 import click
 from os.path import join, dirname, abspath
 from os import environ, makedirs
@@ -47,7 +49,7 @@ def main(config, weights, checkpoint, test):
     cfg = yaml.safe_load(open(config))
 
      # Create experiment directories using absolute path
-    root_dir = dirname(dirname(abspath(__file__))) # lidiff/
+    root_dir = dirname(abspath(__file__)) # lidiff/
     exp_dir = join(root_dir, 'experiments', cfg['experiment']['id'])
     ckpt_dir = join(exp_dir, 'checkpoints')
     makedirs(ckpt_dir, exist_ok=True)
@@ -62,9 +64,39 @@ def main(config, weights, checkpoint, test):
     else:
         if test:
             # we load the current config file just to overwrite inference parameters to try different stuff during inference
-            ckpt_cfg = yaml.safe_load(open(weights.split('checkpoints')[0] + '/hparams.yaml'))
-            ckpt_cfg['train']['uncond_min_w'] = cfg['train']['uncond_min_w']
-            ckpt_cfg['train']['uncond_max_w'] = cfg['train']['uncond_max_w']
+            # 构建正确的hparams.yaml路径
+            exp_dir = os.path.dirname(os.path.dirname(weights))
+            # 查找lightning_logs目录下的hparams.yaml文件
+            lightning_logs_dir = os.path.join(exp_dir, 'lightning_logs')
+            hparams_path = None
+            
+            if os.path.exists(lightning_logs_dir):
+                # 列出所有version目录
+                versions = [d for d in os.listdir(lightning_logs_dir) if d.startswith('version_')]
+                if versions:
+                    # 使用最新的version目录
+                    versions.sort(key=lambda x: int(x.split('_')[1]))
+                    hparams_path = os.path.join(lightning_logs_dir, versions[-1], 'hparams.yaml')
+            
+            # 如果找到hparams.yaml文件，加载它
+            if hparams_path and os.path.exists(hparams_path):
+                ckpt_cfg = yaml.safe_load(open(hparams_path))
+            else:
+                # 如果找不到hparams.yaml文件，使用当前配置文件
+                print(f"警告: 未找到hparams.yaml文件，使用当前配置文件")
+                ckpt_cfg = cfg.copy()
+            # 检查uncond_min_w和uncond_max_w参数是否存在
+            if 'uncond_min_w' in cfg['train']:
+                ckpt_cfg['train']['uncond_min_w'] = cfg['train']['uncond_min_w']
+            else:
+                # 如果不存在，设置默认值
+                ckpt_cfg['train']['uncond_min_w'] = 0.0
+            
+            if 'uncond_max_w' in cfg['train']:
+                ckpt_cfg['train']['uncond_max_w'] = cfg['train']['uncond_max_w']
+            else:
+                # 如果不存在，设置默认值
+                ckpt_cfg['train']['uncond_max_w'] = 10.0
             ckpt_cfg['train']['num_workers'] = cfg['train']['num_workers']
             ckpt_cfg['train']['n_gpus'] = cfg['train']['n_gpus']
             ckpt_cfg['train']['batch_size'] = cfg['train']['batch_size']
@@ -115,8 +147,6 @@ def main(config, weights, checkpoint, test):
                           callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
                           check_val_every_n_epoch=1,
                           num_sanity_val_steps=0,
-                          limit_train_batches=10, # DEBUG: Run only 10 batches per epoch for fast testing
-                          limit_val_batches=5,    # DEBUG: Run only 5 batches for validation
                           accelerator='ddp',
                           )
     else:
@@ -126,10 +156,10 @@ def main(config, weights, checkpoint, test):
                           resume_from_checkpoint=checkpoint,
                           max_epochs= cfg['train']['max_epoch'],
                           callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
-                          check_val_every_n_epoch=1,
+                          check_val_every_n_epoch=2,
                           num_sanity_val_steps=0,
-                          limit_train_batches=10, # DEBUG: Run only 10 batches per epoch for fast testing
-                          limit_val_batches=5,    # DEBUG: Run only 5 batches for validation
+                          # limit_train_batches=10, # DEBUG: Run only 10 batches per epoch for fast testing
+                          # limit_val_batches=5,    # DEBUG: Run only 5 batches for validation
                           )
 
 
