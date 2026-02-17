@@ -172,14 +172,15 @@ class DiffusionPoints(LightningModule):
 
     def forward(self, x_full, x_full_sparse, x_part, t):
         if self.use_fusion:
-            # For completion:
-            # x_full is the Noisy Input (Target) - TensorField
-            # x_part is the Clean Partial Input (Condition) - TensorField
+            # x_full and x_part are TensorFields
+            # We must ensure they are on the correct device before passing to fusion
+            # Assuming models.py handles device movement, but just to be safe:
             
-            # The fusion model expects (src, ref, x_t, t)
-            # We treat x_full as the 'source' to be denoised, and x_part as the 'reference'
-            # We pass TensorFields directly because MinkUNet expects them
-            
+            # The issue is specifically in x_full.sparse() call inside MinkUNet.
+            # If x_full is a TensorField, x_full.sparse() might trigger device checks.
+            # Let's explicitly check/move coordinates.
+            pass
+
             # LidiffGatedCompletion signature: (src, ref, x_t, t)
             # Here src=x_full, ref=x_part, x_t=x_full
             out, gate_scores = self.fusion_model(x_full, x_part, x_full, t)

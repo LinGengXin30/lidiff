@@ -26,21 +26,41 @@ class SiameseFeatureExtractor(nn.Module):
         F_ref_feats = self.backbone(ref_field)
         
         # 2. Wrap back to SparseTensor for Fusion Module
-        src_sparse = src_field.sparse()
-        ref_sparse = ref_field.sparse()
+        # We must explicitly check if .sparse() handles device correctly, if not, recreate.
+        # But here MinkUNet returns dense feats, and src_field is a TensorField.
+        # We need to be careful: MinkUNet forward modifies internal state or returns new coords?
+        # Actually MinkUNet forward returns a dense tensor corresponding to src_field.
+        # But wait, src_field.sparse() might create a SparseTensor on CPU if not careful?
+        # Let's ensure src_field is on device first.
         
+        src_sparse = src_field.sparse()
+        if src_sparse.device != src_field.device:
+             # Force move to device if needed, though usually .sparse() should respect it
+             # But ME 0.5.4 might have bugs.
+             # Better way: Create SparseTensor manually using F_src_feats and src_field coordinates
+             pass
+
+        # Re-create SparseTensors ensuring device is correct
+        # Use src_field.C and F_src_feats
+        # F_src_feats is (N, C) dense tensor on GPU (output of MinkUNet)
+        # src_field.C is (N, 4) coordinates. 
+        # We need to make sure coordinates are on the same device as features for ME.SparseTensor
+        
+        coords_src = src_field.C.to(F_src_feats.device)
+        coords_ref = ref_field.C.to(F_ref_feats.device)
+
         F_src = ME.SparseTensor(
             features=F_src_feats,
-            coordinate_map_key=src_sparse.coordinate_map_key,
-            coordinate_manager=src_sparse.coordinate_manager,
-            device=src_sparse.device
+            coordinates=coords_src,
+            coordinate_manager=src_field.coordinate_manager,
+            device=F_src_feats.device
         )
         
         F_ref = ME.SparseTensor(
             features=F_ref_feats,
-            coordinate_map_key=ref_sparse.coordinate_map_key,
-            coordinate_manager=ref_sparse.coordinate_manager,
-            device=ref_sparse.device
+            coordinates=coords_ref,
+            coordinate_manager=ref_field.coordinate_manager,
+            device=F_ref_feats.device
         )
         
         return F_src, F_ref
