@@ -607,7 +607,8 @@ class MinkUNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        x0 = self.stem(x.sparse())
+        x_sparse = x.sparse()
+        x0 = self.stem(x_sparse)
         x1 = self.stage1(x0)
         x2 = self.stage2(x1)
         x3 = self.stage3(x2)
