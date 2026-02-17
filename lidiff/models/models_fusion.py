@@ -16,16 +16,33 @@ class SiameseFeatureExtractor(nn.Module):
         # out_channels is set by the caller (feature_dim)
         self.backbone = MinkUNet(**backbone_kwargs)
 
-    def forward(self, src_sparse, ref_sparse):
-        # Ensure inputs are sparse tensors
-        if not isinstance(src_sparse, ME.SparseTensor):
-            src_sparse = src_sparse.sparse()
-        if not isinstance(ref_sparse, ME.SparseTensor):
-            ref_sparse = ref_sparse.sparse()
-
-        # Shared weights
-        F_src = self.backbone(src_sparse)
-        F_ref = self.backbone(ref_sparse)
+    def forward(self, src_field, ref_field):
+        # Input: ME.TensorField
+        # MinkUNet.forward(x) returns dense features (N, C)
+        # It handles .sparse() internally
+        
+        # 1. Forward Pass
+        F_src_feats = self.backbone(src_field)
+        F_ref_feats = self.backbone(ref_field)
+        
+        # 2. Wrap back to SparseTensor for Fusion Module
+        src_sparse = src_field.sparse()
+        ref_sparse = ref_field.sparse()
+        
+        F_src = ME.SparseTensor(
+            features=F_src_feats,
+            coordinate_map_key=src_sparse.coordinate_map_key,
+            coordinate_manager=src_sparse.coordinate_manager,
+            device=src_sparse.device
+        )
+        
+        F_ref = ME.SparseTensor(
+            features=F_ref_feats,
+            coordinate_map_key=ref_sparse.coordinate_map_key,
+            coordinate_manager=ref_sparse.coordinate_manager,
+            device=ref_sparse.device
+        )
+        
         return F_src, F_ref
 
 class GatedAttentionFusion(nn.Module):
@@ -147,8 +164,7 @@ class LidiffGatedCompletion(nn.Module):
 
     def forward(self, src, ref, x_t, t):
         # 1. Extract Features (Siamese)
-        # src and ref should be ME.SparseTensor
-        # .sparse() calls in extractor will ensure they are sparse
+        # src and ref should be ME.TensorField for MinkUNet
         F_src, F_ref = self.extractor(src, ref)
         
         # 2. Fuse Features

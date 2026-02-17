@@ -173,17 +173,16 @@ class DiffusionPoints(LightningModule):
     def forward(self, x_full, x_full_sparse, x_part, t):
         if self.use_fusion:
             # For completion:
-            # x_full_sparse is the Noisy Input (Target)
-            # x_part is the Clean Partial Input (Condition)
+            # x_full is the Noisy Input (Target) - TensorField
+            # x_part is the Clean Partial Input (Condition) - TensorField
             
             # The fusion model expects (src, ref, x_t, t)
-            # We treat x_full_sparse as the 'source' to be denoised, and x_part as the 'reference'
-            # Note: x_part is a TensorField, so we convert to SparseTensor
-            x_part_sparse = x_part.sparse()
+            # We treat x_full as the 'source' to be denoised, and x_part as the 'reference'
+            # We pass TensorFields directly because MinkUNet expects them
             
             # LidiffGatedCompletion signature: (src, ref, x_t, t)
-            # Here src=x_full_sparse, ref=x_part_sparse, x_t=x_full_sparse
-            out, gate_scores = self.fusion_model(x_full_sparse, x_part_sparse, x_full_sparse, t)
+            # Here src=x_full, ref=x_part, x_t=x_full
+            out, gate_scores = self.fusion_model(x_full, x_part, x_full, t)
             
             self.last_gate_scores = gate_scores # Save for logging
             
