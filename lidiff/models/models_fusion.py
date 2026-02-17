@@ -17,6 +17,12 @@ class SiameseFeatureExtractor(nn.Module):
         self.backbone = MinkUNet(**backbone_kwargs)
 
     def forward(self, src_sparse, ref_sparse):
+        # Ensure inputs are sparse tensors
+        if not isinstance(src_sparse, ME.SparseTensor):
+            src_sparse = src_sparse.sparse()
+        if not isinstance(ref_sparse, ME.SparseTensor):
+            ref_sparse = ref_sparse.sparse()
+
         # Shared weights
         F_src = self.backbone(src_sparse)
         F_ref = self.backbone(ref_sparse)
@@ -86,7 +92,8 @@ class GatedAttentionFusion(nn.Module):
         F_condition = ME.SparseTensor(
             features=flattened_feats,
             coordinate_map_key=F_src.coordinate_map_key,
-            coordinate_manager=F_src.coordinate_manager
+            coordinate_manager=F_src.coordinate_manager,
+            device=F_src.device
         )
         
         return F_condition, gate_score
@@ -130,6 +137,7 @@ class LidiffGatedCompletion(nn.Module):
         assert len(timesteps.shape) == 1
         half_dim = embedding_dim // 2
         emb = np.log(10000) / (half_dim - 1)
+        # Create tensor directly on device to avoid CPU-GPU mismatch
         emb = torch.from_numpy(np.exp(np.arange(0, half_dim) * -emb)).float().to(timesteps.device)
         emb = timesteps[:, None] * emb[None, :]
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
@@ -140,6 +148,7 @@ class LidiffGatedCompletion(nn.Module):
     def forward(self, src, ref, x_t, t):
         # 1. Extract Features (Siamese)
         # src and ref should be ME.SparseTensor
+        # .sparse() calls in extractor will ensure they are sparse
         F_src, F_ref = self.extractor(src, ref)
         
         # 2. Fuse Features
@@ -162,10 +171,13 @@ class LidiffGatedCompletion(nn.Module):
         batch_indices = x_t_sparse.C[:, 0].long()
         t_emb_expanded = t_emb[batch_indices]
         
+        # Create SparseTensor for time embedding
+        # Explicitly specify device to match x_t_sparse
         t_emb_sparse = ME.SparseTensor(
             features=t_emb_expanded,
             coordinate_map_key=x_t_sparse.coordinate_map_key,
-            coordinate_manager=x_t_sparse.coordinate_manager
+            coordinate_manager=x_t_sparse.coordinate_manager,
+            device=x_t_sparse.device 
         )
         
         # Concatenate: x_t + F_condition + t_emb
