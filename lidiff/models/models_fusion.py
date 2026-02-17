@@ -58,7 +58,21 @@ class GatedAttentionFusion(nn.Module):
         
     def sparse_to_dense(self, sparse_tensor):
         # Decomposition returns a list of tensors [N1, C], [N2, C], ...
-        batch_list = sparse_tensor.decomposition()
+        # In ME 0.5.4, decomposition might not be available as a method on SparseTensor
+        # Use ME.utils.sparse_collate or manual decomposition
+        try:
+             batch_list = sparse_tensor.decomposed_features
+        except AttributeError:
+             # Manual decomposition using coordinates
+             C = sparse_tensor.C
+             F = sparse_tensor.F
+             batch_indices = C[:, 0]
+             batch_size = int(batch_indices.max().item()) + 1
+             batch_list = []
+             for b in range(batch_size):
+                 mask = batch_indices == b
+                 batch_list.append(F[mask])
+        
         max_n = max([t.shape[0] for t in batch_list])
         batch_size = len(batch_list)
         feature_dim = batch_list[0].shape[1]
