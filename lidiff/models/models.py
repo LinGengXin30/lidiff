@@ -264,9 +264,10 @@ class DiffusionPoints(LightningModule):
     def valid_paths(self, filenames):
         output_paths = []
         skip = []
+        log_dir = self.logger.log_dir if getattr(self, 'logger', None) is not None else 'tmp'
 
         for fname in filenames:
-            seq_dir =  f'{self.logger.log_dir}/generated_pcd/{fname.split("/")[-3]}'
+            seq_dir =  f'{log_dir}/generated_pcd/{fname.split("/")[-3]}'
             ply_name = f'{fname.split("/")[-1].split(".")[0]}.ply'
 
             skip.append(path.isfile(f'{seq_dir}/{ply_name}'))
