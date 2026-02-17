@@ -322,17 +322,28 @@ class DiffusionPoints(LightningModule):
 
         cd_mean, cd_std = self.chamfer_distance.compute()
         pr, re, f1 = self.precision_recall.compute_auc()
-        print(f'CD Mean: {cd_mean}\tCD Std: {cd_std}')
-        print(f'Precision: {pr}\tRecall: {re}\tF-Score: {f1}')
+        print(f'CD Mean: {cd_mean:.4f}\tCD Std: {cd_std:.4f}')
+        print(f'Precision: {pr:.4f}\tRecall: {re:.4f}\tF-Score: {f1:.4f}')
 
-        self.log('test/cd_mean', cd_mean, on_step=True)
-        self.log('test/cd_std', cd_std, on_step=True)
-        self.log('test/precision', pr, on_step=True)
-        self.log('test/recall', re, on_step=True)
-        self.log('test/fscore', f1, on_step=True)
+        # Convert to CPU/Python float immediately to avoid errors
+        def to_float(x):
+            if hasattr(x, 'detach'): return x.detach().cpu().item()
+            return x
+
+        cd_mean_f = to_float(cd_mean)
+        cd_std_f = to_float(cd_std)
+        pr_f = to_float(pr)
+        re_f = to_float(re)
+        f1_f = to_float(f1)
+
+        self.log('test/cd_mean', cd_mean_f, on_step=True)
+        self.log('test/cd_std', cd_std_f, on_step=True)
+        self.log('test/precision', pr_f, on_step=True)
+        self.log('test/recall', re_f, on_step=True)
+        self.log('test/fscore', f1_f, on_step=True)
         torch.cuda.empty_cache()
 
-        return {'test/cd_mean': cd_mean, 'test/cd_std': cd_std, 'test/precision': pr, 'test/recall': re, 'test/fscore': f1}
+        return {'test/cd_mean': cd_mean_f, 'test/cd_std': cd_std_f, 'test/precision': pr_f, 'test/recall': re_f, 'test/fscore': f1_f}
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams['train']['lr'], betas=(0.9, 0.999))
