@@ -2,6 +2,7 @@
 import os
 import yaml
 import torch
+import traceback
 import click
 import pandas as pd
 from pytorch_lightning import Trainer
@@ -9,6 +10,15 @@ from lidiff.models.models import DiffusionPoints
 from lidiff.datasets.datasets import dataloaders
 from os.path import join, dirname, abspath
 import MinkowskiEngine as ME
+
+_orig_tensor_numpy = torch.Tensor.numpy
+
+def _patched_tensor_numpy(self, *args, **kwargs):
+    if getattr(self, "is_cuda", False):
+        return _orig_tensor_numpy(self.detach().cpu(), *args, **kwargs)
+    return _orig_tensor_numpy(self, *args, **kwargs)
+
+torch.Tensor.numpy = _patched_tensor_numpy
 
 @click.command()
 @click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)')
