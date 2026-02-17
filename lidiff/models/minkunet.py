@@ -54,7 +54,11 @@ class GenerativeDeconvolutionBlock(nn.Module):
         self.relu = ME.MinkowskiReLU(inplace=True)
 
     def forward(self, x, coords, key):
-        out = self.conv(x, coords, key)
+        # MinkowskiEngine.MinkowskiGenerativeConvolutionTranspose.forward accepts:
+        # (input, coordinates, coordinate_map_key=None)
+        # However, the positional argument count suggests only 2 positional arguments (+self).
+        # This means `coordinates` IS the second argument, and `coordinate_map_key` MUST be a keyword argument.
+        out = self.conv(x, coords, coordinate_map_key=key)
         out = self.bn(out)
         return self.relu(out)
 
