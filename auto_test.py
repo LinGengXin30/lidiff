@@ -73,10 +73,15 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
         except Exception:
             return None
 
-    def get_metric(metrics, keys):
+    def get_metric(metrics, keys, fuzzy_terms=None):
         for k in keys:
             if k in metrics:
                 return metrics[k]
+        if fuzzy_terms:
+            for name, value in metrics.items():
+                lower = name.lower()
+                if all(term in lower for term in fuzzy_terms):
+                    return value
         return None
 
     results = []
@@ -109,6 +114,12 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 # Update model parameter
                 model.w_uncond = w
                 model.hparams['train']['uncond_w'] = w # Keep consistent
+                # Reset metrics accumulators for a clean run
+                try:
+                    model.chamfer_distance.reset()
+                    model.precision_recall.reset()
+                except Exception:
+                    pass
                 
                 # We need a new Trainer instance for each run because PL closes loops
                 # Also silence hardware/progress outputs during construction
@@ -139,8 +150,13 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                                 limit_test_batches=limit_batches,
                             )
                 
+                # Ensure datamodule is properly set up and used
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    test_out = trainer.test(model, dataloaders=data_module, verbose=False)
+                    try:
+                        data_module.setup('test')
+                    except Exception:
+                        pass
+                    test_out = trainer.test(model, datamodule=data_module, verbose=False)
                 
                 # Extract the dict from the list
                 metrics: Dict[str, Any] = test_out[0] if isinstance(test_out, list) and len(test_out) > 0 else {}
@@ -152,8 +168,16 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                         except Exception:
                             metrics = dict(cm)
 
-                cd_val = get_metric(metrics, ['test/cd_mean', 'test_cd_mean', 'test/cd_mean_epoch', 'test_cd_mean_epoch', 'cd_mean'])
-                f1_val = get_metric(metrics, ['test/fscore', 'test_fscore', 'test/fscore_epoch', 'test_fscore_epoch', 'fscore'])
+                cd_val = get_metric(
+                    metrics,
+                    ['test/cd_mean', 'test_cd_mean', 'test/cd_mean_epoch', 'test_cd_mean_epoch', 'cd_mean'],
+                    fuzzy_terms=['cd', 'mean'],
+                )
+                f1_val = get_metric(
+                    metrics,
+                    ['test/fscore', 'test_fscore', 'test/fscore_epoch', 'test_fscore_epoch', 'fscore'],
+                    fuzzy_terms=['f'],
+                )
                 cd = safe_float(cd_val) if cd_val is not None else None
                 f1 = safe_float(f1_val) if f1_val is not None else None
 
@@ -166,7 +190,14 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 })
 
                 if cd is None or f1 is None:
-                    print("no-metrics")
+                    if isinstance(metrics, dict) and metrics:
+                        try:
+                            known = [k for k in metrics.keys() if 'cd' in k.lower() or 'f' in k.lower()]
+                            print(f"no-metrics ({', '.join(known)})")
+                        except Exception:
+                            print("no-metrics")
+                    else:
+                        print("no-metrics")
                 else:
                     print(f"CD={cd:.6f} F1={f1:.6f}")
 
