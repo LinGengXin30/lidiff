@@ -94,17 +94,23 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
 
                 # Print Result
                 # Metrics from PL might be tensors on GPU
-                cd = metrics.get('test/cd_mean', -1)
-                f1 = metrics.get('test/fscore', -1)
-                
-                # Robustly handle tensor/gpu conversion
                 def safe_item(x):
-                    if torch.is_tensor(x):
-                        return x.detach().cpu().item()
-                    return x
+                    try:
+                        if torch.is_tensor(x):
+                            return x.detach().cpu().item()
+                        return x
+                    except:
+                        return -1.0
 
-                cd = safe_item(metrics.get('test/cd_mean', -1))
-                f1 = safe_item(metrics.get('test/fscore', -1))
+                cd_raw = metrics.get('test/cd_mean', -1)
+                f1_raw = metrics.get('test/fscore', -1)
+                
+                cd = safe_item(cd_raw)
+                f1 = safe_item(f1_raw)
+                
+                # Double check to prevent any possibility of tensor slipping through
+                if torch.is_tensor(cd): cd = -2.0
+                if torch.is_tensor(f1): f1 = -2.0
                 
                 print(f"  -> Result [w={w}]: CD={cd:.4f}, F1={f1:.4f}")
 
