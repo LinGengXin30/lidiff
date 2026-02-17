@@ -193,11 +193,14 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                     if isinstance(metrics, dict) and metrics:
                         try:
                             known = [k for k in metrics.keys() if 'cd' in k.lower() or 'f' in k.lower()]
-                            print(f"no-metrics ({', '.join(known)})")
+                            if known:
+                                print(f"no-metrics ({', '.join(known)})")
+                            else:
+                                print(f"no-metrics (Available keys: {list(metrics.keys())})")
                         except Exception:
-                            print("no-metrics")
+                            print(f"no-metrics (metrics={metrics})")
                     else:
-                        print("no-metrics")
+                        print("no-metrics (metrics is empty or not a dict)")
                 else:
                     print(f"CD={cd:.6f} F1={f1:.6f}")
 

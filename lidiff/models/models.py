@@ -252,11 +252,11 @@ class DiffusionPoints(LightningModule):
         cd_mean, cd_std = self.chamfer_distance.compute()
         pr, re, f1 = self.precision_recall.compute_auc()
 
-        self.log('val/cd_mean', cd_mean, on_step=True)
-        self.log('val/cd_std', cd_std, on_step=True)
-        self.log('val/precision', pr, on_step=True)
-        self.log('val/recall', re, on_step=True)
-        self.log('val/fscore', f1, on_step=True)
+        self.log('val/cd_mean', cd_mean, on_step=True, on_epoch=True)
+        self.log('val/cd_std', cd_std, on_step=True, on_epoch=True)
+        self.log('val/precision', pr, on_step=True, on_epoch=True)
+        self.log('val/recall', re, on_step=True, on_epoch=True)
+        self.log('val/fscore', f1, on_step=True, on_epoch=True)
         torch.cuda.empty_cache()
 
         return {'val/cd_mean': cd_mean, 'val/cd_std': cd_std, 'val/precision': pr, 'val/recall': re, 'val/fscore': f1}
@@ -343,11 +343,11 @@ class DiffusionPoints(LightningModule):
         re_f = to_float(re)
         f1_f = to_float(f1)
 
-        self.log('test/cd_mean', cd_mean_f, on_step=True)
-        self.log('test/cd_std', cd_std_f, on_step=True)
-        self.log('test/precision', pr_f, on_step=True)
-        self.log('test/recall', re_f, on_step=True)
-        self.log('test/fscore', f1_f, on_step=True)
+        self.log('test/cd_mean', cd_mean_f, on_step=True, on_epoch=True)
+        self.log('test/cd_std', cd_std_f, on_step=True, on_epoch=True)
+        self.log('test/precision', pr_f, on_step=True, on_epoch=True)
+        self.log('test/recall', re_f, on_step=True, on_epoch=True)
+        self.log('test/fscore', f1_f, on_step=True, on_epoch=True)
         torch.cuda.empty_cache()
 
         return {'test/cd_mean': cd_mean_f, 'test/cd_std': cd_std_f, 'test/precision': pr_f, 'test/recall': re_f, 'test/fscore': f1_f}
