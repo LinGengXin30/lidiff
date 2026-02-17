@@ -282,7 +282,7 @@ class DiffusionPoints(LightningModule):
         self.log('train/std', std_noise.std())
         
         if self.use_fusion and hasattr(self, 'last_gate_scores'):
-            self.log('train/gate_mean', self.last_gate_scores.mean())
+            self.log('train/gate_mean', self.last_gate_scores.mean(), prog_bar=True)
             self.log('train/gate_max', self.last_gate_scores.max())
             self.log('train/gate_min', self.last_gate_scores.min())
             
