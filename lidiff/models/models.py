@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import lidiff.models.minkunet as minknet
+from lidiff.models.models_fusion import LidiffGatedCompletion
 import numpy as np
 import MinkowskiEngine as ME
 import open3d as o3d
@@ -75,6 +76,18 @@ class DiffusionPoints(LightningModule):
 
         self.partial_enc = minknet.MinkGlobalEnc(in_channels=3, out_channels=self.hparams['model']['out_dim'])
         self.model = minknet.MinkUNetDiff(in_channels=3, out_channels=self.hparams['model']['out_dim'])
+
+        # Check for fusion model config
+        self.use_fusion = self.hparams['model'].get('use_fusion', False)
+        if self.use_fusion:
+            print("Initializing LidiffGatedCompletion Model...")
+            self.fusion_model = LidiffGatedCompletion(
+                in_channels=3,
+                out_channels=self.hparams['model']['out_dim'],
+                feature_dim=self.hparams['model']['out_dim']
+            )
+            # We don't need partial_enc and model if using fusion, but keeping them to avoid breaking other methods if they are referenced
+            # Ideally we should refactor, but for now let's just override forward.
 
         self.chamfer_distance = ChamferDistance()
         self.precision_recall = PrecisionRecall(self.hparams['data']['resolution'],2*self.hparams['data']['resolution'],100)
@@ -158,6 +171,24 @@ class DiffusionPoints(LightningModule):
         return F.mse_loss(y, noise)
 
     def forward(self, x_full, x_full_sparse, x_part, t):
+        if self.use_fusion:
+            # For completion:
+            # x_full_sparse is the Noisy Input (Target)
+            # x_part is the Clean Partial Input (Condition)
+            
+            # The fusion model expects (src, ref, x_t, t)
+            # We treat x_full_sparse as the 'source' to be denoised, and x_part as the 'reference'
+            # Note: x_part is a TensorField, so we convert to SparseTensor
+            x_part_sparse = x_part.sparse()
+            
+            # LidiffGatedCompletion signature: (src, ref, x_t, t)
+            # Here src=x_full_sparse, ref=x_part_sparse, x_t=x_full_sparse
+            out, gate_scores = self.fusion_model(x_full_sparse, x_part_sparse, x_full_sparse, t)
+            
+            self.last_gate_scores = gate_scores # Save for logging
+            
+            return out.reshape(t.shape[0],-1,3)
+        
         part_feat = self.partial_enc(x_part)
         out = self.model(x_full, x_full_sparse, part_feat, t)
         return out.reshape(t.shape[0],-1,3)
@@ -209,9 +240,15 @@ class DiffusionPoints(LightningModule):
         self.log('train/loss_mse', loss_mse)
         self.log('train/loss_mean', loss_mean)
         self.log('train/loss_std', loss_std)
-        self.log('train/loss', loss)
+        self.log('train/loss', loss, prog_bar=True)
         self.log('train/var', std_noise.var())
         self.log('train/std', std_noise.std())
+        
+        if self.use_fusion and hasattr(self, 'last_gate_scores'):
+            self.log('train/gate_mean', self.last_gate_scores.mean())
+            self.log('train/gate_max', self.last_gate_scores.max())
+            self.log('train/gate_min', self.last_gate_scores.min())
+            
         torch.cuda.empty_cache()
 
         return loss
