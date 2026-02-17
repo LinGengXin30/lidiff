@@ -91,7 +91,8 @@ def numpy_to_sparse_tensor(p_coord, p_feats, p_label=None):
     p_feats = torch.vstack(p_feats).float()
 
     if p_label is not None:
-        p_label = ME.utils.batched_coordinates(p_label, device=torch.device('cpu')).numpy()
+        p_label = ME.utils.batched_coordinates(p_label, device=torch.device('cpu'))
+        p_label = p_label.detach().cpu().numpy()
     
         return ME.SparseTensor(
                 features=p_feats,

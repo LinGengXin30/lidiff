@@ -1,6 +1,7 @@
 import open3d as o3d
 import numpy as np
 import scipy
+import torch
 
 MESHTYPE = 6
 TETRATYPE = 10
