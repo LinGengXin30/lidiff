@@ -621,18 +621,47 @@ class MinkUNet(nn.Module):
         x4 = self.stage4(x3)
 
         y1 = self.up1[0](x4, x3.C, x3.coordinate_map_key)
+        # Ensure y1 and x3 have the same coordinate map key
+        if y1.coordinate_map_key != x3.coordinate_map_key:
+             y1 = ME.SparseTensor(
+                 features=y1.F,
+                 coordinate_map_key=x3.coordinate_map_key,
+                 coordinate_manager=x3.coordinate_manager,
+                 device=x3.device
+             )
         y1 = ME.cat(y1, x3)
         y1 = self.up1[1](y1)
 
         y2 = self.up2[0](y1, x2.C, x2.coordinate_map_key)
+        if y2.coordinate_map_key != x2.coordinate_map_key:
+             y2 = ME.SparseTensor(
+                 features=y2.F,
+                 coordinate_map_key=x2.coordinate_map_key,
+                 coordinate_manager=x2.coordinate_manager,
+                 device=x2.device
+             )
         y2 = ME.cat(y2, x2)
         y2 = self.up2[1](y2)
 
         y3 = self.up3[0](y2, x1.C, x1.coordinate_map_key)
+        if y3.coordinate_map_key != x1.coordinate_map_key:
+             y3 = ME.SparseTensor(
+                 features=y3.F,
+                 coordinate_map_key=x1.coordinate_map_key,
+                 coordinate_manager=x1.coordinate_manager,
+                 device=x1.device
+             )
         y3 = ME.cat(y3, x1)
         y3 = self.up3[1](y3)
 
         y4 = self.up4[0](y3, x0.C, x0.coordinate_map_key)
+        if y4.coordinate_map_key != x0.coordinate_map_key:
+             y4 = ME.SparseTensor(
+                 features=y4.F,
+                 coordinate_map_key=x0.coordinate_map_key,
+                 coordinate_manager=x0.coordinate_manager,
+                 device=x0.device
+             )
         y4 = ME.cat(y4, x0)
         y4 = self.up4[1](y4)
 
