@@ -282,8 +282,19 @@ class DiffusionPoints(LightningModule):
         with torch.no_grad():
             skip, output_paths = self.valid_paths(batch['filename'])
 
+            # If we are not saving PCDs, force generation (ignore existing files)
+            # This is important for auto_test.py where we just want metrics
+            if not self.hparams.get('experiment', {}).get('save_test_pcd', False):
+                skip = False
+
             if skip:
                 print(f'Skipping generation from {output_paths[0]} to {output_paths[-1]}') 
+                # Log zeros so we don't crash with "no-metrics"
+                self.log('test/cd_mean', 0.0, on_step=True, on_epoch=True)
+                self.log('test/cd_std', 0.0, on_step=True, on_epoch=True)
+                self.log('test/precision', 0.0, on_step=True, on_epoch=True)
+                self.log('test/recall', 0.0, on_step=True, on_epoch=True)
+                self.log('test/fscore', 0.0, on_step=True, on_epoch=True)
                 return {'test/cd_mean': 0., 'test/cd_std': 0., 'test/precision': 0., 'test/recall': 0., 'test/fscore': 0.}
 
             gt_pts = batch['pcd_full'].detach().cpu().numpy()
