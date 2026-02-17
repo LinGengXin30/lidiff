@@ -45,6 +45,19 @@ class BasicDeconvolutionBlock(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class GenerativeDeconvolutionBlock(nn.Module):
+    def __init__(self, inc, outc, ks=3, stride=1, D=3):
+        super().__init__()
+        self.conv = ME.MinkowskiGenerativeConvolutionTranspose(
+            inc, outc, kernel_size=ks, stride=stride, dimension=D)
+        self.bn = ME.MinkowskiBatchNorm(outc)
+        self.relu = ME.MinkowskiReLU(inplace=True)
+
+    def forward(self, x, coords, key):
+        out = self.conv(x, coords, key)
+        out = self.bn(out)
+        return self.relu(out)
+
 
 class ResidualBlock(nn.Module):
     def __init__(self, inc, outc, ks=3, stride=1, dilation=1, D=3):
@@ -542,7 +555,7 @@ class MinkUNet(nn.Module):
         )
 
         self.up1 = nn.ModuleList([
-            BasicDeconvolutionBlock(cs[4], cs[5], ks=2, stride=2, D=self.D),
+            GenerativeDeconvolutionBlock(cs[4], cs[5], ks=2, stride=2, D=self.D),
             nn.Sequential(
                 ResidualBlock(cs[5] + cs[3], cs[5], ks=3, stride=1,
                               dilation=1, D=self.D),
@@ -551,7 +564,7 @@ class MinkUNet(nn.Module):
         ])
 
         self.up2 = nn.ModuleList([
-            BasicDeconvolutionBlock(cs[5], cs[6], ks=2, stride=2, D=self.D),
+            GenerativeDeconvolutionBlock(cs[5], cs[6], ks=2, stride=2, D=self.D),
             nn.Sequential(
                 ResidualBlock(cs[6] + cs[2], cs[6], ks=3, stride=1,
                               dilation=1, D=self.D),
@@ -560,7 +573,7 @@ class MinkUNet(nn.Module):
         ])
 
         self.up3 = nn.ModuleList([
-            BasicDeconvolutionBlock(cs[6], cs[7], ks=2, stride=2, D=self.D),
+            GenerativeDeconvolutionBlock(cs[6], cs[7], ks=2, stride=2, D=self.D),
             nn.Sequential(
                 ResidualBlock(cs[7] + cs[1], cs[7], ks=3, stride=1,
                               dilation=1, D=self.D),
@@ -569,7 +582,7 @@ class MinkUNet(nn.Module):
         ])
 
         self.up4 = nn.ModuleList([
-            BasicDeconvolutionBlock(cs[7], cs[8], ks=2, stride=2, D=self.D),
+            GenerativeDeconvolutionBlock(cs[7], cs[8], ks=2, stride=2, D=self.D),
             nn.Sequential(
                 ResidualBlock(cs[8] + cs[0], cs[8], ks=3, stride=1,
                               dilation=1, D=self.D),
@@ -600,19 +613,19 @@ class MinkUNet(nn.Module):
         x3 = self.stage3(x2)
         x4 = self.stage4(x3)
 
-        y1 = self.up1[0](x4)
+        y1 = self.up1[0](x4, x3.C, x3.coordinate_map_key)
         y1 = ME.cat(y1, x3)
         y1 = self.up1[1](y1)
 
-        y2 = self.up2[0](y1)
+        y2 = self.up2[0](y1, x2.C, x2.coordinate_map_key)
         y2 = ME.cat(y2, x2)
         y2 = self.up2[1](y2)
 
-        y3 = self.up3[0](y2)
+        y3 = self.up3[0](y2, x1.C, x1.coordinate_map_key)
         y3 = ME.cat(y3, x1)
         y3 = self.up3[1](y3)
 
-        y4 = self.up4[0](y3)
+        y4 = self.up4[0](y3, x0.C, x0.coordinate_map_key)
         y4 = ME.cat(y4, x0)
         y4 = self.up4[1](y4)
 
