@@ -212,7 +212,22 @@ class LidiffGatedCompletion(nn.Module):
         
         # Concatenate: x_t + F_condition + t_emb
         # Ensure F_condition aligns with x_t
-        # If x_t corresponds to src, they should align.
+        if F_condition.coordinate_map_key != x_t_sparse.coordinate_map_key:
+             F_condition = ME.SparseTensor(
+                 features=F_condition.F,
+                 coordinate_map_key=x_t_sparse.coordinate_map_key,
+                 coordinate_manager=x_t_sparse.coordinate_manager,
+                 device=x_t_sparse.device
+             )
+        
+        if t_emb_sparse.coordinate_map_key != x_t_sparse.coordinate_map_key:
+             t_emb_sparse = ME.SparseTensor(
+                 features=t_emb_sparse.F,
+                 coordinate_map_key=x_t_sparse.coordinate_map_key,
+                 coordinate_manager=x_t_sparse.coordinate_manager,
+                 device=x_t_sparse.device
+             )
+
         decoder_input = ME.cat(x_t_sparse, F_condition, t_emb_sparse)
         
         # 4. Decode
