@@ -4,27 +4,7 @@ import torch.nn.functional as F
 import MinkowskiEngine as ME
 import numpy as np
 from lidiff.models.minkunet import MinkUNetDiff
-
-# Attempt to import GeoTransformer. 
-# If the module is missing in the environment, we provide a placeholder to ensure the code structure is valid.
-# The user is expected to have 'geotransformer' package installed or in the python path.
-try:
-    from geotransformer.modules.geotransformer import GeometricTransformer
-except ImportError:
-    print("Warning: GeoTransformer not found. Using a placeholder for GeometricEncoderWrapper.")
-    class GeometricTransformer(nn.Module):
-        def __init__(self, input_dim=3, output_dim=256, **kwargs):
-            super().__init__()
-            self.output_dim = output_dim
-        def forward(self, ref_pcd, src_pcd):
-            # Placeholder forward
-            # Return random features for testing structure
-            B, N, _ = src_pcd.shape
-            M = ref_pcd.shape[1]
-            return {
-                'src_feats': torch.zeros(B, N, self.output_dim, device=src_pcd.device),
-                'ref_feats': torch.zeros(B, M, self.output_dim, device=ref_pcd.device)
-            }
+from geotransformer.modules.geotransformer import GeometricTransformer
 
 class GeometricEncoderWrapper(nn.Module):
     """
@@ -33,13 +13,25 @@ class GeometricEncoderWrapper(nn.Module):
     """
     def __init__(self, feature_dim=256, **kwargs):
         super().__init__()
-        # Initialize GeometricTransformer
-        # We assume standard usage. Adjust arguments based on actual GeoTransformer API.
-        self.encoder = GeometricTransformer(
-            input_dim=3,
-            output_dim=feature_dim,
-            **kwargs
-        )
+        
+        # Configuration for GeoTransformer
+        # We need to adapt the args to match GeoTransformer's __init__
+        # Default settings if not provided in kwargs
+        geo_cfg = {
+            'input_dim': kwargs.get('input_dim', 3), # Usually xyz
+            'output_dim': feature_dim,
+            'hidden_dim': kwargs.get('hidden_dim', 128),
+            'num_heads': kwargs.get('num_heads', 4),
+            'blocks': kwargs.get('blocks', ['self', 'cross', 'self', 'cross', 'self', 'cross']),
+            'sigma_d': kwargs.get('sigma_d', 0.2),
+            'sigma_a': kwargs.get('sigma_a', 15),
+            'angle_k': kwargs.get('angle_k', 3),
+            'dropout': kwargs.get('dropout', None),
+            'activation_fn': kwargs.get('activation_fn', 'ReLU'),
+            'reduction_a': kwargs.get('reduction_a', 'max'),
+        }
+        
+        self.encoder = GeometricTransformer(**geo_cfg)
         self.feature_dim = feature_dim
 
     def forward(self, src_pcd, ref_pcd):
@@ -51,25 +43,31 @@ class GeometricEncoderWrapper(nn.Module):
             src_feats: (Batch, N, D_model)
             ref_feats: (Batch, M, D_model)
         """
-        # GeoTransformer typically handles batching internally or expects list of tensors.
-        # Here we assume it handles (B, N, 3) input or we might need to collate.
-        # For this implementation, we assume the wrapper handles the API call.
+        # GeoTransformer expects:
+        # ref_points, src_points, ref_feats, src_feats
+        # We use xyz as initial features if no other features provided
         
-        # Note: Ensure src_pcd and ref_pcd are in the format GeoTransformer expects.
-        # Often GeoTransformer takes a dictionary or separate arguments.
-        output = self.encoder(ref_pcd, src_pcd)
+        src_feats_in = src_pcd
+        ref_feats_in = ref_pcd
         
-        # Extract features from the output dictionary
-        # We target the Fine-level Transformer output for dense features.
-        if isinstance(output, dict):
-             # Adjust keys based on actual GeoTransformer output
-            src_feats = output.get('src_feats', output.get('src_points_feature', None))
-            ref_feats = output.get('ref_feats', output.get('ref_points_feature', None))
-        else:
-            # Fallback if output is tuple
-            src_feats, ref_feats = output
+        # Note: GeoTransformer expects (B, N, 3) format, which we have.
+        # It returns ref_feats, src_feats
+        
+        # Important: The user requirement says:
+        # Input: src_pcd (Partial source), ref_pcd (Complete reference)
+        # GeoTransformer signature: forward(ref_points, src_points, ref_feats, src_feats)
+        # So we map:
+        # ref_points -> ref_pcd
+        # src_points -> src_pcd
+        
+        ref_feats_out, src_feats_out = self.encoder(
+            ref_points=ref_pcd,
+            src_points=src_pcd,
+            ref_feats=ref_feats_in,
+            src_feats=src_feats_in
+        )
             
-        return src_feats, ref_feats
+        return src_feats_out, ref_feats_out
 
 class GatedFeatureFusion(nn.Module):
     """
