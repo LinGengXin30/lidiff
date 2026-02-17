@@ -98,17 +98,13 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 f1 = metrics.get('test/fscore', -1)
                 
                 # Robustly handle tensor/gpu conversion
-                try:
-                    if hasattr(cd, 'cpu'): cd = cd.cpu()
-                    if hasattr(cd, 'numpy'): cd = cd.numpy()
-                    if hasattr(cd, 'item'): cd = cd.item()
-                except: pass
+                def safe_item(x):
+                    if torch.is_tensor(x):
+                        return x.detach().cpu().item()
+                    return x
 
-                try:
-                    if hasattr(f1, 'cpu'): f1 = f1.cpu()
-                    if hasattr(f1, 'numpy'): f1 = f1.numpy()
-                    if hasattr(f1, 'item'): f1 = f1.item()
-                except: pass
+                cd = safe_item(metrics.get('test/cd_mean', -1))
+                f1 = safe_item(metrics.get('test/fscore', -1))
                 
                 print(f"  -> Result [w={w}]: CD={cd:.4f}, F1={f1:.4f}")
 
