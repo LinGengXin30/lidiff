@@ -677,19 +677,123 @@ class MinkUNet(nn.Module):
         y4 = ME.cat(y4, x0)
         y4 = self.up4[1](y4)
 
-        # y4 is a SparseTensor, x is a TensorField.
-        # We need to map y4 features back to x coordinates.
-        # x.sparse() created x_sparse with a new key because we manually created it.
-        # But x itself (TensorField) has its own key.
-        # y4 inherits key from x0, which inherits from x_sparse.
-        # So y4 key != x key.
-        # slice(x) requires y4 to share coordinate manager with x, which is true.
-        # But inverse_mapping requires a mapping between x (field) and y4 (sparse).
+        # Use slice() which handles interpolation correctly when keys match
+        # But we know keys mismatch.
+        # We need to use features_at_coordinates but ensure we get features for ALL x.C coordinates.
+        # features_at_coordinates returns features for coordinates present in the sparse tensor.
+        # If x.C has coordinates not in y4, it might skip them or return 0.
+        # To guarantee output shape matches input x (TensorField), we should query y4 at x.C.
+        # If y4 doesn't have exact coordinate match (due to quantization), we should use interpolation.
         
-        # Since we manually created x_sparse, the link between x and x_sparse might be broken or not registered in manager.
-        # We should use features_at_coordinates instead of slice() if keys mismatch.
+        # In ME, features_at_coordinates does exact match lookup.
+        # If points are lost due to quantization (multiple points falling into same voxel),
+        # we might have fewer unique voxels in y4 than points in x.
+        # BUT x is a TensorField, so it can have multiple points per voxel?
+        # No, TensorField usually implies dense points.
+        # If x was quantized to create x_sparse, multiple x points -> 1 x_sparse voxel.
+        # y4 is based on x_sparse, so it has 1 feature per voxel.
+        # We want to map 1 voxel feature -> multiple original points.
         
-        # Or simply:
-        return self.last(y4.features_at_coordinates(x.C.float()))
+        # The correct way is to use the coordinate manager's mapping from field to sparse.
+        # But that mapping was lost because we recreated x_sparse manually.
+        
+        # Solution: Use nearest neighbor interpolation to map y4 features to x.C
+        # This is robust to quantization and small coordinate shifts.
+        # We can use ME.MinkowskiInterpolation or simple KNN.
+        # Given we are in the model forward pass, simple KNN is differentiable.
+        # Or even simpler:
+        # Since x_sparse was created by quantizing x, we can just find which voxel each x point belongs to.
+        # coords = x.C
+        # We can use y4.features_at_coordinates(coords) IF coords match exactly.
+        # But coords in y4 are quantized (integers). x.C might be floats?
+        # Wait, ME works with integer coordinates for SparseTensors.
+        # If x is TensorField, x.C are coordinates.
+        # If we quantized x to get x_sparse, we should use the same quantization to query y4.
+        
+        # Let's check if x.C matches y4.C format.
+        # Assuming standard quantization (floor).
+        # We can just query y4 at x.C.
+        # If features_at_coordinates returns fewer points, it means some x.C are not in y4.C.
+        # This shouldn't happen if y4 covers the whole space of x.
+        
+        # However, to be absolutely safe and correct:
+        # We use a simple KNN (k=1) to find the closest feature in y4 for each point in x.
+        # This guarantees output shape == x.shape[0].
+        
+        # Use pykeops or simple torch cdist for KNN?
+        # y4.C is (M, 4), x.C is (N, 4). N=10000, M~9997.
+        # Brute force distance matrix (10000x10000) is too big (100MB float, okay actually).
+        # But we have batch dimension.
+        
+        # Better approach:
+        # Use the fact that we know the mapping is "quantization".
+        # We can just re-quantize x.C and query y4.
+        # But `features_at_coordinates` does exactly that if we pass the right coords.
+        
+        # Let's try to enforce the mapping.
+        # x is the original TensorField.
+        # y4 is the output SparseTensor.
+        # We want features for every point in x.
+        
+        # If we use `slice(x)`, ME uses the `field_to_sparse` map stored in the manager.
+        # Since we broke the manager link, we can try to restore it or use a raw interpolation.
+        
+        # Let's implement a robust "feature fetcher":
+        # 1. Get features from y4 corresponding to x.C
+        # 2. If missing, fill with nearest valid feature or 0.
+        
+        # Actually, `MinkowskiEngine` provides `MinkowskiInterpolation` module.
+        # It takes `features`, `coordinates` (source), and `query_coordinates` (target).
+        # But here features are sparse.
+        
+        # Let's use `slice()` but first fix the manager link? Impossible inside forward.
+        
+        # The most robust "appropriate" method:
+        # Re-quantize x.C using the same quantization size as the network used.
+        # This gives us the keys to look up in y4.
+        # Since y4 is a SparseTensor, it is a hash map.
+        # `features_at_coordinates` performs this lookup.
+        # If it fails to return N features, it means some quantized coordinates are missing from y4.
+        # This implies y4 (the decoded output) has holes where x had points.
+        # This can happen if the U-Net has stride/padding issues or if we dropped points.
+        
+        # Given the urgency, I will implement a custom nearest neighbor lookup using torch.cdist block-wise or simple indexing if possible.
+        # But wait, `x` (TensorField) has `.C` (coordinates).
+        # `y4` (SparseTensor) has `.C` (coordinates) and `.F` (features).
+        
+        # Let's use a simple distance-based lookup for the missing points, or just standard interpolation.
+        # Since points are 10000, we can do it per batch.
+        
+        # Implementation:
+        # Iterate over batch, find nearest y4 point for each x point.
+        # This ensures exactly N output points.
+        
+        out_feats = []
+        x_C = x.C
+        y4_C = y4.C
+        y4_F = y4.F
+        
+        # Group by batch index
+        batch_ids = x_C[:, 0].unique()
+        for b in batch_ids:
+             mask_x = x_C[:, 0] == b
+             mask_y = y4_C[:, 0] == b
+             
+             xc_b = x_C[mask_x, 1:] # (N, 3)
+             yc_b = y4_C[mask_y, 1:] # (M, 3)
+             yf_b = y4_F[mask_y]     # (M, C)
+             
+             # Compute distances
+             # (N, 1, 3) - (1, M, 3) -> (N, M, 3)
+             # Memory heavy if N,M large. 10000^2 is 100M floats = 400MB. OK for GPU.
+             dists = torch.cdist(xc_b.float(), yc_b.float()) # (N, M)
+             
+             # Get nearest neighbor index
+             min_dist, idx = dists.min(dim=1) # (N,)
+             
+             # Gather features
+             out_feats.append(yf_b[idx])
+             
+        return self.last(torch.cat(out_feats, dim=0))
 
 

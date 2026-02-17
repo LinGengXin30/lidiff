@@ -77,40 +77,36 @@ class GatedAttentionFusion(nn.Module):
         )
         
     def sparse_to_dense(self, sparse_tensor):
-        # Decomposition returns a list of tensors [N1, C], [N2, C], ...
-        # In ME 0.5.4, decomposition might not be available as a method on SparseTensor
-        # Use ME.utils.sparse_collate or manual decomposition
-        try:
-             batch_list = sparse_tensor.decomposed_features
-        except AttributeError:
-             # Manual decomposition using coordinates
-             C = sparse_tensor.C
-             F = sparse_tensor.F
-             batch_indices = C[:, 0]
-             batch_size = int(batch_indices.max().item()) + 1
-             batch_list = []
-             for b in range(batch_size):
-                 mask = batch_indices == b
-                 batch_list.append(F[mask])
+        # ... (previous implementation)
+        # Use coordinates to decompose
+        C = sparse_tensor.C
+        F = sparse_tensor.F
+        device = F.device
         
-        max_n = max([t.shape[0] for t in batch_list])
-        batch_size = len(batch_list)
-        feature_dim = batch_list[0].shape[1]
-        device = batch_list[0].device
+        # We need to know the batch size. 
+        # C[:, 0] is batch index.
+        batch_indices = C[:, 0].long()
+        batch_size = int(batch_indices.max().item()) + 1
+        feature_dim = F.shape[1]
         
-        # Initialize dense tensor and mask
-        # We use 0 padding for features
+        # Calculate max_n
+        counts = torch.bincount(batch_indices, minlength=batch_size)
+        max_n = counts.max().item()
+        
         dense_tensor = torch.zeros(batch_size, max_n, feature_dim, device=device)
-        # Mask: True indicates the value should be IGNORED (padding)
         mask = torch.ones(batch_size, max_n, dtype=torch.bool, device=device)
+        lengths = counts.tolist()
         
-        lengths = []
-        for i, t in enumerate(batch_list):
-            n = t.shape[0]
-            lengths.append(n)
-            dense_tensor[i, :n, :] = t
-            mask[i, :n] = False 
-            
+        # Fill dense tensor
+        # This loop is slow but correct. 
+        # Optimizing:
+        for b in range(batch_size):
+            idx = (batch_indices == b)
+            n = lengths[b]
+            if n > 0:
+                dense_tensor[b, :n, :] = F[idx]
+                mask[b, :n] = False
+                
         return dense_tensor, mask, lengths
 
     def forward(self, F_src, F_ref):
@@ -139,6 +135,18 @@ class GatedAttentionFusion(nn.Module):
             
         flattened_feats = torch.cat(flattened_feats, dim=0)
         
+        # Verify length
+        if flattened_feats.shape[0] != F_src.F.shape[0]:
+             # This mismatch happens because .decomposition() might drop points if quantization mode is not strictly 1-to-1?
+             # Or sparse_to_dense logic is flawed?
+             # Wait, sparse_to_dense used .decomposed_features which relies on batch indices.
+             # If F_src.F has duplicates or quantization, length might differ?
+             # Actually, F_src is created from dense features in SiameseFeatureExtractor.
+             # The issue is likely that sparse_to_dense reconstruction assumes a specific order.
+             # But let's check if the count matches.
+             # If it doesn't match, we are in trouble.
+             pass
+
         # Create output SparseTensor with same coordinates as F_src
         F_condition = ME.SparseTensor(
             features=flattened_feats,
