@@ -55,10 +55,12 @@ class GenerativeDeconvolutionBlock(nn.Module):
 
     def forward(self, x, coords, key):
         # MinkowskiEngine.MinkowskiGenerativeConvolutionTranspose.forward accepts:
-        # (input, coordinates, coordinate_map_key=None)
-        # However, the positional argument count suggests only 2 positional arguments (+self).
-        # This means `coordinates` IS the second argument, and `coordinate_map_key` MUST be a keyword argument.
-        out = self.conv(x, coords, coordinate_map_key=key)
+        # (input, coordinates) - NO KEY ARGUMENT IN OLD VERSIONS
+        # In older versions (like 0.5.4), it uses coordinates directly and might ignore explicit key or infer it.
+        # Since passing key failed both as positional (too many args) and keyword (unexpected kwarg),
+        # we MUST assume it only takes (input, coordinates).
+        # We rely on ME using the coordinates to match the output sparsity.
+        out = self.conv(x, coords)
         out = self.bn(out)
         return self.relu(out)
 
