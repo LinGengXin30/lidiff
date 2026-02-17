@@ -613,7 +613,19 @@ class MinkUNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        x_sparse = x.sparse()
+        # x is ME.TensorField
+        # We need to manually construct a SparseTensor ensuring device consistency
+        
+        # Ensure coordinates are on the same device as features
+        coords = x.C.to(x.F.device)
+        
+        x_sparse = ME.SparseTensor(
+            features=x.F,
+            coordinates=coords,
+            coordinate_manager=x.coordinate_manager,
+            device=x.F.device
+        )
+        
         x0 = self.stem(x_sparse)
         x1 = self.stage1(x0)
         x2 = self.stage2(x1)
