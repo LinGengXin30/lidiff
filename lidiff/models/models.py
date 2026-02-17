@@ -327,8 +327,16 @@ class DiffusionPoints(LightningModule):
 
         # Convert to CPU/Python float immediately to avoid errors
         def to_float(x):
-            if hasattr(x, 'detach'): return x.detach().cpu().item()
-            return x
+            # Check if x is a torch tensor
+            if torch.is_tensor(x):
+                return x.detach().cpu().item()
+            # Check if x is a numpy array (0-d or 1-d)
+            if isinstance(x, np.ndarray):
+                return float(x.item()) if x.size == 1 else float(x[0])
+            # Check if x is a numpy scalar (e.g. np.float64)
+            if isinstance(x, (np.floating, np.integer)):
+                return float(x)
+            return float(x)
 
         cd_mean_f = to_float(cd_mean)
         cd_std_f = to_float(cd_std)
