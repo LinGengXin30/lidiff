@@ -677,6 +677,19 @@ class MinkUNet(nn.Module):
         y4 = ME.cat(y4, x0)
         y4 = self.up4[1](y4)
 
-        return self.last(y4.slice(x).F)
+        # y4 is a SparseTensor, x is a TensorField.
+        # We need to map y4 features back to x coordinates.
+        # x.sparse() created x_sparse with a new key because we manually created it.
+        # But x itself (TensorField) has its own key.
+        # y4 inherits key from x0, which inherits from x_sparse.
+        # So y4 key != x key.
+        # slice(x) requires y4 to share coordinate manager with x, which is true.
+        # But inverse_mapping requires a mapping between x (field) and y4 (sparse).
+        
+        # Since we manually created x_sparse, the link between x and x_sparse might be broken or not registered in manager.
+        # We should use features_at_coordinates instead of slice() if keys mismatch.
+        
+        # Or simply:
+        return self.last(y4.features_at_coordinates(x.C.float()))
 
 
