@@ -180,12 +180,49 @@ class DiffusionPoints(LightningModule):
             # If x_full is a TensorField, x_full.sparse() might trigger device checks.
             # Let's explicitly check/move coordinates.
             pass
-
+ 
             # LidiffGatedCompletion signature: (src, ref, x_t, t)
             # Here src=x_full, ref=x_part, x_t=x_full
             out, gate_scores = self.fusion_model(x_full, x_part, x_full, t)
             
             self.last_gate_scores = gate_scores # Save for logging
+            
+            # Reshape out to (B, N, 3)
+            # x_full is (B*N, 4) in C, or (B*N, 3) in F?
+            # Actually x_full is TensorField.
+            # We need to make sure out matches x_full length.
+            # MinkUNet forward with KNN guarantees output length equals x_full length.
+            
+            # However, if we are calling fusion_model, it calls extractor (Siamese), then fusion, then decoder.
+            # The decoder is MinkUNet.
+            # MinkUNet forward (my modified version) returns features for all points in x_t.
+            # x_t here is x_full (TensorField).
+            
+            # But wait, MinkUNet forward takes x (TensorField) as input.
+            # In LidiffGatedCompletion.forward:
+            # noise_pred = self.decoder(decoder_input)
+            # decoder_input is ME.cat(x_t_sparse, F_condition, t_emb_sparse) which is a SparseTensor!
+            
+            # If decoder input is SparseTensor, my modified MinkUNet forward logic for TensorField (KNN) IS NOT TRIGGERED!
+            # It uses the SparseTensor path!
+            
+            # Let's look at MinkUNet.forward again.
+            # def forward(self, x):
+            #     if isinstance(x, ME.TensorField):
+            #         ... KNN logic ...
+            #     else:
+            #         # Standard SparseTensor logic
+            #         x0 = self.stem(x)
+            #         ...
+            #         return self.last(y4.slice(x).F)  <-- THIS FAILS OR RETURNS WRONG SHAPE
+            
+            # We need to fix LidiffGatedCompletion to pass the TensorField x_t to decoder?
+            # No, decoder expects SparseTensor input (features+coords).
+            # But we want output for the original TensorField points.
+            
+            # We need to manually interpolate the output of decoder (SparseTensor) back to x_full (TensorField).
+            
+            # Let's modify LidiffGatedCompletion.forward to perform the interpolation.
             
             return out.reshape(t.shape[0],-1,3)
         

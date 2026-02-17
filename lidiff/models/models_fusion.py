@@ -259,6 +259,112 @@ class LidiffGatedCompletion(nn.Module):
         decoder_input = ME.cat(x_t_sparse, F_condition, t_emb_sparse)
         
         # 4. Decode
-        noise_pred = self.decoder(decoder_input)
+        # decoder_input is a SparseTensor.
+        # MinkUNet.forward(SparseTensor) will return a TensorField or SparseTensor depending on output.
+        # But we need output for ORIGINAL x_t points (TensorField).
+        # We need to pass the target coordinates to decoder if possible, 
+        # or interpolate the output manually.
         
-        return noise_pred, gate_scores
+        noise_pred_sparse = self.decoder(decoder_input) 
+        # noise_pred_sparse is (N_sparse, 3) dense tensor because MinkUNet.forward returns last(y4.slice(x).F)
+        # But wait, MinkUNet.forward returns `last(y4.slice(x).F)` or `last(interpolated)` based on my changes.
+        # If input to decoder is SparseTensor, my `forward(x)` logic in MinkUNet:
+        # It assumes `x` is TensorField for interpolation logic?
+        # Let's check MinkUNet.forward signature again.
+        
+        # If x is SparseTensor, x.C is available.
+        # My updated MinkUNet.forward uses x.C for interpolation.
+        # So it will return (N_sparse, 3).
+        # But N_sparse < N_full (10000).
+        
+        # We need to interpolate FROM noise_pred_sparse TO x_t (TensorField).
+        
+        # Let's perform the interpolation here in LidiffGatedCompletion.
+        
+        # noise_pred_sparse is actually just features (N_sparse, 3)
+        # We need the coordinates of these features to interpolate.
+        # But MinkUNet.forward returns just the features! We lost the coordinates!
+        
+        # We must modify MinkUNet to return the SparseTensor if we want to interpolate outside?
+        # Or we pass x_t (TensorField) to decoder?
+        # But decoder expects input features to be concatenated (3+C+C).
+        # x_t only has 3 features.
+        
+        # HACK: We pass `decoder_input` (SparseTensor) as input to decoder.
+        # But we want the output to match `x_t` (TensorField).
+        # My updated MinkUNet.forward uses `x.C` to interpolate.
+        # If I pass `decoder_input` as `x`, it interpolates to `decoder_input.C` (which is sparse).
+        
+        # WE NEED TO PASS x_t (TensorField) for INTERPOLATION TARGET!
+        # But MinkUNet doesn't support separate input and target args in forward.
+        
+        # Solution:
+        # Perform interpolation here using the SparseTensor output of decoder layer.
+        # But we can't access intermediate layers here easily.
+        
+        # Wait, if I change MinkUNet forward to accept an optional `target` argument?
+        # Or I use a wrapper.
+        
+        # Let's do the interpolation MANUALLY here.
+        # But first I need the SparseTensor output from decoder, not just features.
+        # I need to modify MinkUNet to return SparseTensor?
+        
+        # Actually, let's look at `self.decoder`.
+        # It's a `MinkUNet`.
+        # Its forward calls `stem`, `stage`, `up`, `last`.
+        # `last` is a Linear layer.
+        
+        # I will add a method to `LidiffGatedCompletion` to perform the interpolation.
+        # But I need the output of the UNet before the final slice/interpolation.
+        
+        # Given I cannot easily change MinkUNet signature without breaking other things...
+        # I will modify MinkUNet.forward to check if input is SparseTensor, 
+        # and if so, return the SparseTensor (y4) instead of slicing it?
+        # No, that breaks existing code.
+        
+        # Let's assume I can use KNN here.
+        # I have `decoder_input` (SparseTensor).
+        # I have `noise_pred_sparse` (Features corresponding to decoder_input coordinates).
+        # I have `x_t` (TensorField target).
+        
+        # So:
+        # source_coords = decoder_input.C
+        # source_feats = noise_pred_sparse
+        # target_coords = x_t.C
+        
+        # Interpolate!
+        
+        # But wait, does `self.decoder(decoder_input)` return features aligned with `decoder_input.C`?
+        # Yes, my updated `MinkUNet.forward` does:
+        # `return self.last(torch.cat(out_feats, dim=0))` where out_feats matches input `x` coordinates.
+        # If input `x` is `decoder_input` (SparseTensor), then output matches `decoder_input` coordinates.
+        
+        # So `noise_pred_sparse` has shape (N_sparse, 3) and aligns with `decoder_input.C`.
+        
+        # Now I just need to interpolate from (decoder_input.C, noise_pred_sparse) to (x_t.C).
+        
+        if isinstance(x_t, ME.TensorField):
+             # Interpolate
+             out_feats = []
+             x_C = x_t.C
+             y_C = decoder_input.C
+             y_F = noise_pred_sparse # (N_sparse, 3)
+             
+             # Group by batch
+             batch_ids = x_C[:, 0].unique()
+             for b in batch_ids:
+                 mask_x = x_C[:, 0] == b
+                 mask_y = y_C[:, 0] == b
+                 
+                 xc_b = x_C[mask_x, 1:]
+                 yc_b = y_C[mask_y, 1:]
+                 yf_b = y_F[mask_y]
+                 
+                 dists = torch.cdist(xc_b.float(), yc_b.float())
+                 min_dist, idx = dists.min(dim=1)
+                 out_feats.append(yf_b[idx])
+             
+             noise_pred = torch.cat(out_feats, dim=0)
+             return noise_pred, gate_scores
+
+        return noise_pred_sparse, gate_scores
