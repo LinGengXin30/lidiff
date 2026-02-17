@@ -10,6 +10,7 @@ from lidiff.models.models import DiffusionPoints
 import lidiff.models.models as models_mod
 from lidiff.datasets.datasets import dataloaders
 from os.path import join, dirname, abspath
+from typing import Any, Dict
 
 _orig_tensor_numpy = torch.Tensor.numpy
 
@@ -21,6 +22,17 @@ def _patched_tensor_numpy(self, *args, **kwargs):
 torch.Tensor.numpy = _patched_tensor_numpy
 
 models_mod.tqdm = lambda x: x
+
+def _silence_pl_logs():
+    try:
+        from pytorch_lightning.utilities import rank_zero
+        rank_zero.rank_zero_info = lambda *a, **k: None
+        rank_zero.rank_zero_debug = lambda *a, **k: None
+        rank_zero.rank_zero_warn = lambda *a, **k: None
+    except Exception:
+        pass
+
+_silence_pl_logs()
 
 @click.command()
 @click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)')
@@ -99,20 +111,49 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 model.hparams['train']['uncond_w'] = w # Keep consistent
                 
                 # We need a new Trainer instance for each run because PL closes loops
-                trainer = Trainer(
-                    gpus=1,
-                    logger=False,
-                    limit_test_batches=limit_batches,
-                    enable_checkpointing=False,
-                )
+                # Also silence hardware/progress outputs during construction
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    try:
+                        trainer = Trainer(
+                            gpus=1,
+                            logger=False,
+                            limit_test_batches=limit_batches,
+                            enable_checkpointing=False,
+                            enable_progress_bar=False,
+                            enable_model_summary=False,
+                        )
+                    except TypeError:
+                        try:
+                            trainer = Trainer(
+                                gpus=1,
+                                logger=False,
+                                limit_test_batches=limit_batches,
+                                checkpoint_callback=False,
+                                progress_bar_refresh_rate=0,
+                                weights_summary=None,
+                            )
+                        except TypeError:
+                            trainer = Trainer(
+                                gpus=1,
+                                logger=False,
+                                limit_test_batches=limit_batches,
+                            )
                 
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     test_out = trainer.test(model, dataloaders=data_module, verbose=False)
                 
                 # Extract the dict from the list
-                metrics = test_out[0] if isinstance(test_out, list) and len(test_out) > 0 else {}
-                cd_val = get_metric(metrics, ['test/cd_mean', 'test_cd_mean', 'test/cd_mean_epoch', 'test_cd_mean_epoch'])
-                f1_val = get_metric(metrics, ['test/fscore', 'test_fscore', 'test/fscore_epoch', 'test_fscore_epoch'])
+                metrics: Dict[str, Any] = test_out[0] if isinstance(test_out, list) and len(test_out) > 0 else {}
+                if not isinstance(metrics, dict) or len(metrics) == 0:
+                    cm = getattr(trainer, "callback_metrics", {})
+                    if hasattr(cm, "items"):
+                        try:
+                            metrics = {k: (v.detach().cpu().item() if torch.is_tensor(v) else v) for k, v in cm.items()}
+                        except Exception:
+                            metrics = dict(cm)
+
+                cd_val = get_metric(metrics, ['test/cd_mean', 'test_cd_mean', 'test/cd_mean_epoch', 'test_cd_mean_epoch', 'cd_mean'])
+                f1_val = get_metric(metrics, ['test/fscore', 'test_fscore', 'test/fscore_epoch', 'test_fscore_epoch', 'fscore'])
                 cd = safe_float(cd_val) if cd_val is not None else None
                 f1 = safe_float(f1_val) if f1_val is not None else None
 
