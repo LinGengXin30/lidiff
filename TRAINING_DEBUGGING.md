@@ -94,6 +94,4 @@ If training gets stuck:
 
 1. Use Ctrl+C to interrupt
 2. Resume from last checkpoint using `--checkpoint` flag:
-   ```bash
-   python -m lidiff.train_refine --checkpoint experiments/{experiment_id}/checkpoints/last.ckpt --config path/to/config.yaml
-   ```
+   

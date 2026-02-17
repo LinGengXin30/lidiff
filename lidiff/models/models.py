@@ -288,7 +288,7 @@ class DiffusionPoints(LightningModule):
                 skip = False
 
             if skip:
-                print(f'Skipping generation from {output_paths[0]} to {output_paths[-1]}') 
+                # print(f'Skipping generation from {output_paths[0]} to {output_paths[-1]}')
                 # Log zeros so we don't crash with "no-metrics"
                 self.log('test/cd_mean', 0.0, on_step=True, on_epoch=True)
                 self.log('test/cd_std', 0.0, on_step=True, on_epoch=True)

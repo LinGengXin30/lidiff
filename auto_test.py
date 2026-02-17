@@ -29,14 +29,31 @@ def _silence_pl_logs():
         rank_zero.rank_zero_info = lambda *a, **k: None
         rank_zero.rank_zero_debug = lambda *a, **k: None
         rank_zero.rank_zero_warn = lambda *a, **k: None
+        rank_zero.rank_zero_error = lambda *a, **k: None
+        # Also silence other logging utilities
+        from pytorch_lightning.utilities import logging
+        logging._log_levels = {}
+        # Silence device info logging
+        from pytorch_lightning.trainer import trainer
+        original_print = trainer.print
+        trainer.print = lambda *args, **kwargs: None
     except Exception:
         pass
+
+# Also silence PyTorch Lightning's device info logging
+import logging
+logging.basicConfig(level=logging.CRITICAL)
+# Silence all PyTorch Lightning logs
+for name in logging.Logger.manager.loggerDict:
+    if 'pytorch_lightning' in name.lower():
+        logging.getLogger(name).setLevel(logging.CRITICAL)
+        logging.getLogger(name).propagate = False
 
 _silence_pl_logs()
 
 @click.command()
-@click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)')
-@click.option('--ckpt_dir', type=str, default=None, help='Path to checkpoints directory. If None, inferred from exp_id.')
+@click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)',default='prob10_5p0reg')
+@click.option('--ckpt_dir', type=str, default='/home/fang/PycharmProjects/LiDiff-main/lidiff/experiments/prob10_5p0reg/checkpoints', help='Path to checkpoints directory. If None, inferred from exp_id.')
 @click.option('--uncond_w_list', type=str, default="0.0,2.0,4.0,6.0,8.0,10.0", help='Comma separated list of unconditional weights (guidance scales) to test. Default: 0.0,2.0,4.0,6.0,8.0,10.0')
 @click.option('--limit_batches', type=int, default=10, help='Number of batches to test per checkpoint.')
 @click.option('--save_pcd', is_flag=True, default=False, help='Whether to save generated point clouds.')
@@ -123,6 +140,7 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 
                 # We need a new Trainer instance for each run because PL closes loops
                 # Also silence hardware/progress outputs during construction
+                # Capture all output from Trainer initialization and test
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     try:
                         trainer = Trainer(
@@ -132,6 +150,8 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                             enable_checkpointing=False,
                             enable_progress_bar=False,
                             enable_model_summary=False,
+                            enable_logging=False,
+                            deterministic=False,
                         )
                     except TypeError:
                         try:
@@ -142,6 +162,7 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                                 checkpoint_callback=False,
                                 progress_bar_refresh_rate=0,
                                 weights_summary=None,
+                                log_every_n_steps=0,
                             )
                         except TypeError:
                             trainer = Trainer(
@@ -149,13 +170,13 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                                 logger=False,
                                 limit_test_batches=limit_batches,
                             )
-                
-                # Ensure datamodule is properly set up and used
-                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+
+                    # Ensure datamodule is properly set up and used
                     try:
                         data_module.setup('test')
                     except Exception:
                         pass
+                    # Also capture output during test run
                     test_out = trainer.test(model, datamodule=data_module, verbose=False)
                 
                 # Extract the dict from the list
