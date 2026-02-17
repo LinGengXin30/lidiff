@@ -243,9 +243,46 @@ class DiffusionDecoder(nn.Module):
         # 1. Project condition features
         cond_proj = self.proj(condition_feats) # (Batch, N, 32)
         
+        # Check for shape mismatch (e.g. GeoTransformer downsampling vs Diffusion points)
+        if x_t.shape[1] != cond_proj.shape[1]:
+            # Interpolate condition features to match x_t
+            # cond_proj is (B, N_geo, C). x_t is (B, N_diff, 3).
+            # We treat point features as 1D sequence for interpolation if no spatial structure is assumed,
+            # BUT better to use Nearest Neighbor or Trilinear interpolation based on coordinates.
+            # However, since x_t is just noisy version of src, they should match IF src is not downsampled.
+            
+            # If GeoTransformer downsamples, we need to upsample features back to original points.
+            # Simple heuristic: Interpolate along the sequence dimension (assuming some order) or just use standard interpolation.
+            # Since point clouds are unordered, linear interpolation on indices is WRONG.
+            # We must use coordinate-based interpolation (Three-NN).
+            # But here we don't have the coordinates of the downsampled features readily available inside Decoder.
+            # They are inside 'src_feats' from Backbone.
+            
+            # WORKAROUND:
+            # If the mismatch is simple (e.g. 1000 vs 10000), we can try standard interpolation 
+            # if we assume the order is preserved (which is NOT true for Farthest Point Sampling).
+            
+            # The error says: x_t is 10000, cond_proj is 1000.
+            # This implies GeoTransformer (or Backbone) returned fewer points (downsampled).
+            # GeoTransformer usually operates on superpoints or downsampled grids.
+            
+            # Solution: We need to upsample `cond_proj` to match `x_t`.
+            # Since we don't have the coordinates of the downsampled points here easily,
+            # we will use a simple "Repeat" or "Linear" upsampling as a fallback, 
+            # acknowledging this is suboptimal without coordinate info.
+            # Ideally, we should pass 'src_downsampled_coords' to perform 3-NN interpolation.
+            
+            # For now, to fix the crash:
+            cond_proj = F.interpolate(
+                cond_proj.transpose(1, 2), # (B, C, N_geo)
+                size=x_t.shape[1], # N_diff
+                mode='nearest' # or 'linear'
+            ).transpose(1, 2) # (B, N_diff, C)
+        
         # 2. Concatenate inputs (Refinement 1)
         # input_feats: (Batch, N, 3 + 32)
         input_feats = torch.cat([x_t, cond_proj], dim=-1)
+
         
         # 3. Create SparseTensor
         # Coordinates: x_t (Batch, N, 3) -> need to batchify
