@@ -1,15 +1,15 @@
 
 import os
-import yaml
+import json
+import io
+import contextlib
 import torch
-import traceback
 import click
-import pandas as pd
 from pytorch_lightning import Trainer
 from lidiff.models.models import DiffusionPoints
+import lidiff.models.models as models_mod
 from lidiff.datasets.datasets import dataloaders
 from os.path import join, dirname, abspath
-import MinkowskiEngine as ME
 
 _orig_tensor_numpy = torch.Tensor.numpy
 
@@ -19,6 +19,8 @@ def _patched_tensor_numpy(self, *args, **kwargs):
     return _orig_tensor_numpy(self, *args, **kwargs)
 
 torch.Tensor.numpy = _patched_tensor_numpy
+
+models_mod.tqdm = lambda x: x
 
 @click.command()
 @click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)')
@@ -32,7 +34,7 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
     Evaluate checkpoints with multiple weights per pass.
     """
     
-    root_dir = dirname(dirname(abspath(__file__)))
+    root_dir = dirname(abspath(__file__))
     if ckpt_dir is None:
         ckpt_dir = join(root_dir, 'experiments', exp_id, 'checkpoints')
     
@@ -51,12 +53,26 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
     
     uncond_weights = [float(x) for x in uncond_w_list.split(',')]
     
+    def safe_float(x):
+        if torch.is_tensor(x):
+            return float(x.detach().cpu().item())
+        try:
+            return float(x)
+        except Exception:
+            return None
+
+    def get_metric(metrics, keys):
+        for k in keys:
+            if k in metrics:
+                return metrics[k]
+        return None
+
+    results = []
+
     # Iterate over checkpoints
     for ckpt_name in ckpts:
         ckpt_path = join(ckpt_dir, ckpt_name)
-        print(f"\n{'='*50}")
-        print(f"Evaluating Checkpoint: {ckpt_name}")
-        print(f"{'='*50}")
+        print(f"Evaluating: {ckpt_name}")
         
         try:
             # Load Model
@@ -70,17 +86,14 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
             # Setup Data (only once per checkpoint)
             data_cfg = model.hparams
             data_module = dataloaders[data_cfg['data']['dataloader']](data_cfg)
-            
-            if torch.cuda.device_count() > 1:
-                 model = ME.MinkowskiSyncBatchNorm.convert_sync_batchnorm(model)
 
             # --- EXTERNAL LOOP OVER PARAMETERS ---
             # We run the trainer.test() multiple times for the same checkpoint
             # This avoids modifying models.py, while still testing all weights.
             
             for w in uncond_weights:
-                print(f"\n  Testing with uncond_w = {w} ...")
-                
+                print(f"  w={w}: ", end="", flush=True)
+
                 # Update model parameter
                 model.w_uncond = w
                 model.hparams['train']['uncond_w'] = w # Keep consistent
@@ -90,42 +103,58 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                     gpus=1,
                     logger=False,
                     limit_test_batches=limit_batches,
-                    accelerator='gpu' if torch.cuda.is_available() else 'cpu'
+                    enable_checkpointing=False,
                 )
                 
-                # Run Test
-                # metrics is usually a list of dicts, but limit_test_batches returns accumulated results
-                # in a single dict if using a single dataloader.
-                # However, PL might return tensors still on GPU in that dict.
-                test_out = trainer.test(model, dataloaders=data_module, verbose=False)
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    test_out = trainer.test(model, dataloaders=data_module, verbose=False)
                 
                 # Extract the dict from the list
                 metrics = test_out[0] if isinstance(test_out, list) and len(test_out) > 0 else {}
+                cd_val = get_metric(metrics, ['test/cd_mean', 'test_cd_mean', 'test/cd_mean_epoch', 'test_cd_mean_epoch'])
+                f1_val = get_metric(metrics, ['test/fscore', 'test_fscore', 'test/fscore_epoch', 'test_fscore_epoch'])
+                cd = safe_float(cd_val) if cd_val is not None else None
+                f1 = safe_float(f1_val) if f1_val is not None else None
 
-                # Print Result
-                # Metrics from PL might be tensors on GPU
-                def safe_item(x):
-                    try:
-                        if torch.is_tensor(x):
-                            return x.detach().cpu().item()
-                        return x
-                    except:
-                        return -1.0
+                results.append({
+                    'checkpoint': ckpt_name,
+                    'checkpoint_path': ckpt_path,
+                    'uncond_w': w,
+                    'cd_mean': cd,
+                    'f1': f1,
+                })
 
-                cd_raw = metrics.get('test/cd_mean', -1)
-                f1_raw = metrics.get('test/fscore', -1)
-                
-                cd = safe_item(cd_raw)
-                f1 = safe_item(f1_raw)
-                
-                # Double check to prevent any possibility of tensor slipping through
-                if torch.is_tensor(cd): cd = -2.0
-                if torch.is_tensor(f1): f1 = -2.0
-                
-                print(f"  -> Result [w={w}]: CD={cd:.4f}, F1={f1:.4f}")
+                if cd is None or f1 is None:
+                    print("no-metrics")
+                else:
+                    print(f"CD={cd:.6f} F1={f1:.6f}")
 
         except Exception as e:
             print(f"Error evaluating {ckpt_name}: {e}")
+
+    valid = [r for r in results if isinstance(r.get('f1'), float)]
+    best = None
+    if valid:
+        best = sorted(valid, key=lambda r: (-r['f1'], r['cd_mean'] if r['cd_mean'] is not None else 1e9))[0]
+
+    out_dir = join(root_dir, 'experiments', exp_id)
+    os.makedirs(out_dir, exist_ok=True)
+    out_json = join(out_dir, 'evaluation_results.json')
+    out_txt = join(out_dir, 'evaluation_results.txt')
+    payload = {'exp_id': exp_id, 'limit_batches': limit_batches, 's_steps': s_steps, 'results': results, 'best': best}
+    with open(out_json, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    with open(out_txt, 'w', encoding='utf-8') as f:
+        for r in results:
+            f.write(f"{r['checkpoint']}\tw={r['uncond_w']}\tCD={r['cd_mean']}\tF1={r['f1']}\n")
+        f.write("\n")
+        f.write(f"BEST\t{best}\n")
+
+    print(f"\nSaved: {out_json}")
+    print(f"Saved: {out_txt}")
+    if best is not None:
+        print(f"Best: {best['checkpoint']} w={best['uncond_w']} CD={best['cd_mean']} F1={best['f1']}")
 
 if __name__ == "__main__":
     evaluate_grid()

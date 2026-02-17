@@ -315,16 +315,14 @@ class DiffusionPoints(LightningModule):
                 pcd_gt.points = o3d.utility.Vector3dVector(g_pred)
                 pcd_gt.paint_uniform_color([0., 1.,0.])
                 
-                print(f'Saving {output_paths[i]}')
-                o3d.io.write_point_cloud(f'{output_paths[i]}', pcd_pred)
+                if self.hparams.get('experiment', {}).get('save_test_pcd', False):
+                    o3d.io.write_point_cloud(f'{output_paths[i]}', pcd_pred)
 
                 self.chamfer_distance.update(pcd_gt, pcd_pred)
                 self.precision_recall.update(pcd_gt, pcd_pred)
 
         cd_mean, cd_std = self.chamfer_distance.compute()
         pr, re, f1 = self.precision_recall.compute_auc()
-        print(f'CD Mean: {cd_mean:.4f}\tCD Std: {cd_std:.4f}')
-        print(f'Precision: {pr:.4f}\tRecall: {re:.4f}\tF-Score: {f1:.4f}')
 
         # Convert to CPU/Python float immediately to avoid errors
         def to_float(x):
