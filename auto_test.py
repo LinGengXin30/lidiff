@@ -250,14 +250,28 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
 
     valid = [r for r in results if isinstance(r.get('f1'), float)]
     best = None
+    best_overlap = None
     if valid:
+        # Best based on Global F1 (Primary) and CD (Secondary) - Standard metric
         best = sorted(valid, key=lambda r: (-r['f1'], r['cd_mean'] if r['cd_mean'] is not None else 1e9))[0]
+        
+        # Best based on Overlap CD (Primary) - For Registration/Fusion quality
+        valid_ov = [r for r in valid if r.get('cd_overlap') is not None]
+        if valid_ov:
+            best_overlap = sorted(valid_ov, key=lambda r: r['cd_overlap'])[0]
 
     out_dir = join(root_dir, 'experiments', exp_id)
     os.makedirs(out_dir, exist_ok=True)
     out_json = join(out_dir, 'evaluation_results.json')
     out_txt = join(out_dir, 'evaluation_results.txt')
-    payload = {'exp_id': exp_id, 'limit_batches': limit_batches, 's_steps': s_steps, 'results': results, 'best': best}
+    payload = {
+        'exp_id': exp_id, 
+        'limit_batches': limit_batches, 
+        's_steps': s_steps, 
+        'results': results, 
+        'best_global': best,
+        'best_overlap': best_overlap
+    }
     with open(out_json, 'w', encoding='utf-8') as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
@@ -270,12 +284,16 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                 line += f"\tCD_non={r['cd_non_overlap']}"
             f.write(line + "\n")
         f.write("\n")
-        f.write(f"BEST\t{best}\n")
+        f.write(f"BEST (Global F1/CD)\t{best}\n")
+        if best_overlap:
+            f.write(f"BEST (Overlap CD)\t{best_overlap}\n")
 
     print(f"\nSaved: {out_json}")
     print(f"Saved: {out_txt}")
     if best is not None:
-        print(f"Best: {best['checkpoint']} w={best['uncond_w']} CD={best['cd_mean']} F1={best['f1']}")
+        print(f"Best (Global):  {best['checkpoint']} w={best['uncond_w']} CD={best['cd_mean']:.6f} F1={best['f1']:.6f}")
+    if best_overlap is not None:
+        print(f"Best (Overlap): {best_overlap['checkpoint']} w={best_overlap['uncond_w']} CD_ov={best_overlap['cd_overlap']:.6f}")
 
 if __name__ == "__main__":
     evaluate_grid()

@@ -109,6 +109,25 @@ class RegionAwareMetrics:
                 cd_nov = sum(nov_components) / len(nov_components)
                 self.cd_non_overlap.append(cd_nov.item())
 
+    def update_single(self, pred, gt, source, threshold=0.05):
+        """
+        Update metrics for a single sample (unbatched inputs).
+        pred: [N, 3]
+        gt: [M, 3]
+        source: [K, 3]
+        """
+        # Ensure tensors and add batch dim
+        if not torch.is_tensor(pred): pred = torch.tensor(pred, device=self.device, dtype=torch.float32)
+        if not torch.is_tensor(gt): gt = torch.tensor(gt, device=self.device, dtype=torch.float32)
+        if not torch.is_tensor(source): source = torch.tensor(source, device=self.device, dtype=torch.float32)
+        
+        # Add batch dim [1, N, 3]
+        pred = pred.unsqueeze(0)
+        gt = gt.unsqueeze(0)
+        source = source.unsqueeze(0)
+        
+        self.update(pred, gt, source, threshold)
+
     def compute(self):
         return {
             'CD_global': np.mean(self.cd_global) if self.cd_global else 0.0,

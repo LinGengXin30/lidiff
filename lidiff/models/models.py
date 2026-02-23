@@ -438,14 +438,23 @@ class DiffusionPoints(LightningModule):
 
                 self.chamfer_distance.update(pcd_gt, pcd_pred)
                 self.precision_recall.update(pcd_gt, pcd_pred)
-            
-            # Update Region Aware Metrics (Batch-wise)
-            self.region_metrics.update(
-                x_gen_eval.detach(), 
-                batch['pcd_full'].detach(), 
-                batch['pcd_part'].detach(),
-                threshold=0.05
-            )
+
+                # Update Region Aware Metrics (Single Sample)
+                # Use the filtered/processed point clouds to be consistent with CD metrics
+                # pcd_pred.points and pcd_gt.points are Open3D Vector3dVector
+                # Convert to numpy then tensor
+                pred_pts = np.asarray(pcd_pred.points)
+                gt_pts_filtered = np.asarray(pcd_gt.points)
+                
+                # For source, we use the original partial input for this batch item
+                source_pts = batch['pcd_part'][i].detach().cpu().numpy()
+
+                self.region_metrics.update_single(
+                    pred_pts, 
+                    gt_pts_filtered, 
+                    source_pts,
+                    threshold=0.05
+                )
 
         cd_mean, cd_std = self.chamfer_distance.compute()
         pr, re, f1 = self.precision_recall.compute_auc()
