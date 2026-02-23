@@ -76,22 +76,38 @@ class RegionAwareMetrics:
         mask_pred_overlap = torch.gather(mask_gt_overlap, 1, idx_pred_gt) # [B, N]
 
         # 3. Compute Split CD
-        for b in range(batch_size):
-            # Overlap Region
-            d1_ov = dist_pred_gt[b][mask_pred_overlap[b]]
-            d2_ov = dist_gt_pred[b][mask_gt_overlap[b]]
+            for b in range(batch_size):
+                # Overlap Region
+                d1_ov = dist_pred_gt[b][mask_pred_overlap[b]]
+                d2_ov = dist_gt_pred[b][mask_gt_overlap[b]]
 
-            if len(d1_ov) > 0 and len(d2_ov) > 0:
-                cd_ov = (d1_ov.mean() + d2_ov.mean()) / 2
-                self.cd_overlap.append(cd_ov.item())
-            
-            # Non-Overlap Region
-            d1_nov = dist_pred_gt[b][~mask_pred_overlap[b]]
-            d2_nov = dist_gt_pred[b][~mask_gt_overlap[b]]
+                # Calculate CD_overlap if there is any ground truth overlap region
+                # If d1_ov is empty (no pred points mapped to overlap), we rely on d2_ov
+                ov_components = []
+                if len(d1_ov) > 0:
+                    ov_components.append(d1_ov.mean())
+                if len(d2_ov) > 0:
+                    ov_components.append(d2_ov.mean())
+                
+                if len(ov_components) > 0:
+                    # If both exist: (mean1 + mean2) / 2
+                    # If only one exists: mean1 / 1 (maintains scale)
+                    cd_ov = sum(ov_components) / len(ov_components)
+                    self.cd_overlap.append(cd_ov.item())
+                
+                # Non-Overlap Region
+                d1_nov = dist_pred_gt[b][~mask_pred_overlap[b]]
+                d2_nov = dist_gt_pred[b][~mask_gt_overlap[b]]
 
-            if len(d1_nov) > 0 and len(d2_nov) > 0:
-                cd_nov = (d1_nov.mean() + d2_nov.mean()) / 2
-                self.cd_non_overlap.append(cd_nov.item())
+                nov_components = []
+                if len(d1_nov) > 0:
+                    nov_components.append(d1_nov.mean())
+                if len(d2_nov) > 0:
+                    nov_components.append(d2_nov.mean())
+
+                if len(nov_components) > 0:
+                    cd_nov = sum(nov_components) / len(nov_components)
+                    self.cd_non_overlap.append(cd_nov.item())
 
     def compute(self):
         return {
