@@ -199,8 +199,21 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                     ['test/fscore', 'test_fscore', 'test/fscore_epoch', 'test_fscore_epoch', 'fscore'],
                     fuzzy_terms=['f'],
                 )
+                cd_overlap_val = get_metric(
+                    metrics,
+                    ['test/cd_overlap', 'test_cd_overlap', 'cd_overlap'],
+                    fuzzy_terms=['cd', 'overlap'],
+                )
+                cd_non_overlap_val = get_metric(
+                    metrics,
+                    ['test/cd_non_overlap', 'test_cd_non_overlap', 'cd_non_overlap'],
+                    fuzzy_terms=['cd', 'non', 'overlap'],
+                )
+
                 cd = safe_float(cd_val) if cd_val is not None else None
                 f1 = safe_float(f1_val) if f1_val is not None else None
+                cd_ov = safe_float(cd_overlap_val) if cd_overlap_val is not None else None
+                cd_non_ov = safe_float(cd_non_overlap_val) if cd_non_overlap_val is not None else None
 
                 results.append({
                     'checkpoint': ckpt_name,
@@ -208,6 +221,8 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                     'uncond_w': w,
                     'cd_mean': cd,
                     'f1': f1,
+                    'cd_overlap': cd_ov,
+                    'cd_non_overlap': cd_non_ov,
                 })
 
                 if cd is None or f1 is None:
@@ -223,7 +238,12 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
                     else:
                         print("no-metrics (metrics is empty or not a dict)")
                 else:
-                    print(f"CD={cd:.6f} F1={f1:.6f}")
+                    msg = f"CD={cd:.6f} F1={f1:.6f}"
+                    if cd_ov is not None:
+                        msg += f" CD_ov={cd_ov:.6f}"
+                    if cd_non_ov is not None:
+                        msg += f" CD_non={cd_non_ov:.6f}"
+                    print(msg)
 
         except Exception as e:
             print(f"Error evaluating {ckpt_name}: {e}")
@@ -243,7 +263,12 @@ def evaluate_grid(exp_id, ckpt_dir, uncond_w_list, limit_batches, save_pcd, s_st
 
     with open(out_txt, 'w', encoding='utf-8') as f:
         for r in results:
-            f.write(f"{r['checkpoint']}\tw={r['uncond_w']}\tCD={r['cd_mean']}\tF1={r['f1']}\n")
+            line = f"{r['checkpoint']}\tw={r['uncond_w']}\tCD={r['cd_mean']}\tF1={r['f1']}"
+            if r.get('cd_overlap') is not None:
+                line += f"\tCD_ov={r['cd_overlap']}"
+            if r.get('cd_non_overlap') is not None:
+                line += f"\tCD_non={r['cd_non_overlap']}"
+            f.write(line + "\n")
         f.write("\n")
         f.write(f"BEST\t{best}\n")
 

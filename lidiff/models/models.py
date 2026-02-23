@@ -14,6 +14,7 @@ from pytorch_lightning.core.lightning import LightningModule
 from pytorch_lightning import LightningDataModule
 from lidiff.utils.collations import *
 from lidiff.utils.metrics import ChamferDistance, PrecisionRecall
+from lidiff.utils.region_metrics import RegionAwareMetrics
 from diffusers import DPMSolverMultistepScheduler
 
 class DiffusionPoints(LightningModule):
@@ -91,6 +92,7 @@ class DiffusionPoints(LightningModule):
 
         self.chamfer_distance = ChamferDistance()
         self.precision_recall = PrecisionRecall(self.hparams['data']['resolution'],2*self.hparams['data']['resolution'],100)
+        self.region_metrics = RegionAwareMetrics(device=torch.device('cuda'))
 
         self.w_uncond = self.hparams['train']['uncond_w']
 
@@ -323,17 +325,40 @@ class DiffusionPoints(LightningModule):
                 self.chamfer_distance.update(pcd_gt, pcd_pred)
                 self.precision_recall.update(pcd_gt, pcd_pred)
 
+            # Update Region Aware Metrics (Batch-wise)
+            # x_gen_eval: [B, N, 3], batch['pcd_full']: [B, M, 3], batch['pcd_part']: [B, K, 3]
+            # Need to ensure they are tensors on GPU
+            self.region_metrics.update(
+                x_gen_eval.detach(), 
+                batch['pcd_full'].detach(), 
+                batch['pcd_part'].detach(),
+                threshold=0.05
+            )
+
         cd_mean, cd_std = self.chamfer_distance.compute()
         pr, re, f1 = self.precision_recall.compute_auc()
+        region_res = self.region_metrics.compute()
 
         self.log('val/cd_mean', cd_mean, on_step=True, on_epoch=True)
         self.log('val/cd_std', cd_std, on_step=True, on_epoch=True)
         self.log('val/precision', pr, on_step=True, on_epoch=True)
         self.log('val/recall', re, on_step=True, on_epoch=True)
         self.log('val/fscore', f1, on_step=True, on_epoch=True)
+        
+        self.log('val/cd_overlap', region_res['CD_overlap'], on_step=True, on_epoch=True)
+        self.log('val/cd_non_overlap', region_res['CD_non_overlap'], on_step=True, on_epoch=True)
+        
         torch.cuda.empty_cache()
 
-        return {'val/cd_mean': cd_mean, 'val/cd_std': cd_std, 'val/precision': pr, 'val/recall': re, 'val/fscore': f1}
+        return {
+            'val/cd_mean': cd_mean, 
+            'val/cd_std': cd_std, 
+            'val/precision': pr, 
+            'val/recall': re, 
+            'val/fscore': f1,
+            'val/cd_overlap': region_res['CD_overlap'],
+            'val/cd_non_overlap': region_res['CD_non_overlap']
+        }
     
     def valid_paths(self, filenames):
         output_paths = []
@@ -369,7 +394,15 @@ class DiffusionPoints(LightningModule):
                 self.log('test/precision', 0.0, on_step=True, on_epoch=True)
                 self.log('test/recall', 0.0, on_step=True, on_epoch=True)
                 self.log('test/fscore', 0.0, on_step=True, on_epoch=True)
-                return {'test/cd_mean': 0., 'test/cd_std': 0., 'test/precision': 0., 'test/recall': 0., 'test/fscore': 0.}
+                return {
+                    'test/cd_mean': 0., 
+                    'test/cd_std': 0., 
+                    'test/precision': 0., 
+                    'test/recall': 0., 
+                    'test/fscore': 0.,
+                    'test/cd_overlap': 0.,
+                    'test/cd_non_overlap': 0.
+                }
 
             gt_pts = batch['pcd_full'].detach().cpu().numpy()
 
@@ -405,9 +438,18 @@ class DiffusionPoints(LightningModule):
 
                 self.chamfer_distance.update(pcd_gt, pcd_pred)
                 self.precision_recall.update(pcd_gt, pcd_pred)
+            
+            # Update Region Aware Metrics (Batch-wise)
+            self.region_metrics.update(
+                x_gen_eval.detach(), 
+                batch['pcd_full'].detach(), 
+                batch['pcd_part'].detach(),
+                threshold=0.05
+            )
 
         cd_mean, cd_std = self.chamfer_distance.compute()
         pr, re, f1 = self.precision_recall.compute_auc()
+        region_res = self.region_metrics.compute()
 
         # Convert to CPU/Python float immediately to avoid errors
         def to_float(x):
@@ -427,15 +469,28 @@ class DiffusionPoints(LightningModule):
         pr_f = to_float(pr)
         re_f = to_float(re)
         f1_f = to_float(f1)
+        cd_overlap_f = to_float(region_res['CD_overlap'])
+        cd_non_overlap_f = to_float(region_res['CD_non_overlap'])
 
         self.log('test/cd_mean', cd_mean_f, on_step=True, on_epoch=True)
         self.log('test/cd_std', cd_std_f, on_step=True, on_epoch=True)
         self.log('test/precision', pr_f, on_step=True, on_epoch=True)
         self.log('test/recall', re_f, on_step=True, on_epoch=True)
         self.log('test/fscore', f1_f, on_step=True, on_epoch=True)
+        self.log('test/cd_overlap', cd_overlap_f, on_step=True, on_epoch=True)
+        self.log('test/cd_non_overlap', cd_non_overlap_f, on_step=True, on_epoch=True)
+        
         torch.cuda.empty_cache()
 
-        return {'test/cd_mean': cd_mean_f, 'test/cd_std': cd_std_f, 'test/precision': pr_f, 'test/recall': re_f, 'test/fscore': f1_f}
+        return {
+            'test/cd_mean': cd_mean_f, 
+            'test/cd_std': cd_std_f, 
+            'test/precision': pr_f, 
+            'test/recall': re_f, 
+            'test/fscore': f1_f,
+            'test/cd_overlap': cd_overlap_f,
+            'test/cd_non_overlap': cd_non_overlap_f
+        }
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams['train']['lr'], betas=(0.9, 0.999))
