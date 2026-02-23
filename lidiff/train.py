@@ -31,7 +31,7 @@ class CheckpointDebugCallback(Callback):
               '-c',
               type=str,
               help='path to the config file (.yaml)',
-              default=join(dirname(abspath(__file__)),'config/config.yaml'))
+              default=join(dirname(abspath(__file__)),'config/config_fusion.yaml'))
 @click.option('--weights',
               '-w',
               type=str,
@@ -45,6 +45,15 @@ class CheckpointDebugCallback(Callback):
 @click.option('--test', '-t', is_flag=True, help='test mode')
 def main(config, weights, checkpoint, test):
     set_deterministic()
+
+    # 设置多进程启动方式为spawn，避免fork导致的死锁
+    try:
+        torch.multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        pass
+
+    # 增加内存限制，避免多进程内存溢出
+    torch.multiprocessing.set_sharing_strategy('file_system')
 
     cfg = yaml.safe_load(open(config))
 
@@ -117,6 +126,16 @@ def main(config, weights, checkpoint, test):
         print(model.hparams)
 
     data = datasets.dataloaders[cfg['data']['dataloader']](cfg)
+    
+    # 确保数据加载器在多进程环境下正确初始化
+    if hasattr(data, 'train_dataloader'):
+        train_loader = data.train_dataloader()
+        if hasattr(train_loader, 'dataset'):
+            print(f"训练集大小: {len(train_loader.dataset)}")
+    if hasattr(data, 'val_dataloader') and not test:
+        val_loader = data.val_dataloader()
+        if hasattr(val_loader, 'dataset'):
+            print(f"验证集大小: {len(val_loader.dataset)}")
 
     #Add callbacks
     lr_monitor = LearningRateMonitor(logging_interval='step')
@@ -158,8 +177,8 @@ def main(config, weights, checkpoint, test):
                           callbacks=[lr_monitor, checkpoint_saver, debug_ckpt],
                           check_val_every_n_epoch=2,
                           num_sanity_val_steps=0,
-                          # limit_train_batches=10, # DEBUG: Run only 10 batches per epoch for fast testing
-                          # limit_val_batches=5,    # DEBUG: Run only 5 batches for validation
+                          # limit_train_batches=100, # DEBUG: Run only 10 batches per epoch for fast testing
+                          # limit_val_batches=50,    # DEBUG: Run only 5 batches for validation
                           )
 
 

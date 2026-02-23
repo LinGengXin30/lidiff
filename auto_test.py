@@ -52,8 +52,8 @@ for name in logging.Logger.manager.loggerDict:
 _silence_pl_logs()
 
 @click.command()
-@click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)',default='prob10_5p0reg')
-@click.option('--ckpt_dir', type=str, default='/home/fang/PycharmProjects/LiDiff-main/lidiff/experiments/prob10_5p0reg/checkpoints', help='Path to checkpoints directory. If None, inferred from exp_id.')
+@click.option('--exp_id', type=str, required=True, help='Experiment ID (e.g., prob10_5p0reg)',default='fusion_test_v1')
+@click.option('--ckpt_dir', type=str, default='/home/fang/PycharmProjects/LiDiff-main/lidiff/experiments/fusion_test_v1/checkpoints', help='Path to checkpoints directory. If None, inferred from exp_id.')
 @click.option('--uncond_w_list', type=str, default="0.0,2.0,4.0,6.0,8.0,10.0", help='Comma separated list of unconditional weights (guidance scales) to test. Default: 0.0,2.0,4.0,6.0,8.0,10.0')
 @click.option('--limit_batches', type=int, default=10, help='Number of batches to test per checkpoint.')
 @click.option('--save_pcd', is_flag=True, default=False, help='Whether to save generated point clouds.')
